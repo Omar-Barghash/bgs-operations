@@ -4,14 +4,14 @@
  * and requests to the API always go to the network.
  *
  * Phones pick up new files automatically when online. When you publish an
- * update, also change VERSION below (and APP_VERSION in js/config.js) so the
+ * update, also change VERSION below (and APP_VERSION in config.js) so the
  * saved offline copy is refreshed and phones show "Reload".               */
 const VERSION = '1.0.0';
 const CACHE = 'bgs-ops-' + VERSION;
 const FILES = [
-  './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/shared.js', 'js/config.js', 'js/api.js', 'js/store.js', 'js/sync.js', 'js/ui.js', 'js/fields.js', 'js/files.js', 'js/screens.js', 'js/app.js',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'
+  './', 'index.html', 'manifest.webmanifest', 'app.css',
+  'shared.js', 'config.js', 'api.js', 'store.js', 'sync.js', 'ui.js', 'fields.js', 'files.js', 'screens.js', 'app.js',
+  'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'favicon-32.png'
 ];
 
 self.addEventListener('install', event => {
