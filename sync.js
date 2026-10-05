@@ -201,8 +201,9 @@ export function pendingCount() { return model.outbox.filter(c => c.state !== 're
 export function attentionCount() { return model.outbox.filter(c => c.state === 'refused').length + model.conflicts.length; }
 
 /** Send everything waiting, then download fresh data. Safe to call any time. */
+let again = false;
 export function syncNow() {
-  if (syncing) return syncing;
+  if (syncing) { again = true; return syncing; } // a change arrived mid-sync: run once more afterwards
   if (!model.token) return Promise.resolve();
   syncing = (async () => {
     if (navigator.onLine === false) { setStatus('offline', 'No connection. Changes are kept on this phone.'); return; }
@@ -210,6 +211,9 @@ export function syncNow() {
     try {
       await pushAll();
       const data = await call('pull', {}, model.token);
+      if (!data.tables || !Array.isArray(data.tables.Projects) || !Array.isArray(data.tables.Users)) {
+        throw new ApiError('NETWORK', 'The data download was incomplete. Your data on this phone was kept.');
+      }
       model.snapshot = Object.assign(emptyTables(), data.tables);
       model.user = data.user; model.perms = data.perms; model.today = data.today || localToday();
       model.lastSync = new Date().toISOString();
@@ -226,6 +230,7 @@ export function syncNow() {
       setStatus('failed', (e && e.message) || 'Sync failed.');
     } finally {
       syncing = null;
+      if (again) { again = false; if (pendingCount() && model.status !== 'offline') setTimeout(() => syncNow(), 50); }
     }
   })();
   return syncing;
