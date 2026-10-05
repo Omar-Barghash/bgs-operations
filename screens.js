@@ -164,11 +164,22 @@ export function projectScreen(key) {
       ...[tempNote, stageTrack(p)].filter(Boolean));
 
     const bar = h('div', { class: 'actions-bar' });
-    if (nm && nm.ok) {
-      bar.append(h('button', { class: 'btn primary next-move', onclick: async () => {
+    let needs = null;
+    if (nm) {
+      // The next-stage button is always shown; it stays greyed out until every requirement is met.
+      bar.append(h('button', { class: 'btn primary next-move', disabled: !nm.ok, 'aria-describedby': nm.ok ? null : 'move-needs', onclick: async () => {
+        if (!nm.ok) return;
         await enqueue({ op: 'move', table: 'Projects', key: pnum, to: nm.move.to }, nm.move.name + ': ' + (p['BD Project Name'] || pnum));
         toast('Moved to ' + stageShort(nm.move.to) + '.');
       } }, h('span', null, nm.move.name), iconEl('arrow')));
+      if (!nm.ok) {
+        const lines = [];
+        if (!nm.userAllowed) lines.push('Only ' + B.deptNames(nm.move.depts) + ' can do this step.');
+        nm.reasons.forEach(r => lines.push(r));
+        needs = h('div', { class: 'needs', id: 'move-needs', role: 'note' },
+          h('div', { class: 'needs-title' }, 'Still needed before "' + nm.move.name + '"'),
+          h('ul', null, lines.map(t => h('li', null, t))));
+      }
     }
     bar.append(h('a', { class: 'btn', href: '#/edit/Projects/' + encodeURIComponent(pnum) }, iconEl('edit'), 'Edit'));
     if (B.canReject(p)) {
@@ -181,6 +192,7 @@ export function projectScreen(key) {
       } }, 'Reject'));
     }
     node.append(bar);
+    if (needs) node.append(needs);
 
     node.append(h('div', { class: 'section' }, fieldList('Projects', p, PROJECT_DETAIL)));
 

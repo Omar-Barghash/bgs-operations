@@ -143,11 +143,14 @@ var BGS = (function () {
       sheet: 'Action Tracker', key: 'Action #', keyType: 'number', label: 'Action', parent: { table: 'Projects', column: 'Project #' },
       columns: [
         { name: 'Action #', type: 'number', auto: true },
-        { name: 'Project #', type: 'ref', ref: 'Projects', auto: true },
+        // DECISION (5 Oct 2026, Omar): the project can be chosen when creating an
+        // action (AppSheet: read-only, set only from the project screen).
+        { name: 'Project #', type: 'ref', ref: 'Projects', label: 'Project' },
         { name: 'BD Project Name', type: 'text', auto: true },
         { name: 'Criticality', type: 'text', auto: true },
         { name: 'Action', type: 'text' },
-        { name: 'Owner', type: 'ref', ref: 'Users', auto: true },
+        // SOURCE: Owner is editable, starting as the signed-in user's name.
+        { name: 'Owner', type: 'ref', ref: 'Users' },
         { name: 'Created at', type: 'date' },
         { name: 'Due Date', type: 'date' },
         { name: 'Status', type: 'text', auto: true },
@@ -276,7 +279,8 @@ var BGS = (function () {
           r.visible = fromPricing; break;
       }
     } else if (table === 'Action Tracker') {
-      if (col === 'Action #' || col === 'Project #') { r.visible = false; r.editable = false; }
+      if (col === 'Action #') { r.visible = false; r.editable = false; }
+      if (col === 'Project #') { r.visible = !!ctx.isNew; r.editable = !!ctx.isNew; }
     } else if (table === 'Users') {
       r.editable = PERM.manageUsers(user);
     }
@@ -311,37 +315,52 @@ var BGS = (function () {
   /* ---------- Stage moves (SOURCE: the six "Move to …" actions) ----------
    * data = { items: [items of this project], satisfactions: [records of this project] }
    * Each check returns a list of reasons; an empty list means "allowed".   */
+  /* List what each item still needs, e.g. "Item 563-01: Lead Time, Selling Price".
+   * At most 5 items are named; the rest are counted. */
+  function itemNeeds(items, needsOf) {
+    var out = [], more = 0;
+    for (var i = 0; i < items.length; i++) {
+      var need = needsOf(items[i]);
+      if (!need.length) continue;
+      if (out.length < 5) out.push('Item ' + (norm(items[i].Item_ID) || 'not yet numbered') + ' (' + (norm(items[i].Item_Name) || 'no description') + '): ' + need.join(', '));
+      else more++;
+    }
+    if (more) out.push('and ' + more + ' more item(s)');
+    return out;
+  }
+
   var MOVES = [
     { name: 'Move to Pricing', from: S1, to: S2, depts: [DEPT.OPS, DEPT.MGMT],
       check: function (p, d) {
         var out = [];
         if (isBlank(p.Company)) out.push('Company is empty');
         if (isBlank(p.Customer)) out.push('Customer is empty');
-        if (d.items.length === 0) out.push('Add at least one item');
+        if (d.items.length === 0) out.push('No items yet: add at least one item');
         return out;
       } },
     { name: 'Move to Waiting for Approval', from: S2, to: S3, depts: [DEPT.OPS, DEPT.MGMT],
       check: function (p, d) {
         var out = [];
         if (isBlank(p.Quotation_No)) out.push('Quotation Number is empty');
-        var missing = 0;
-        for (var i = 0; i < d.items.length; i++) {
-          var it = d.items[i];
-          if (isBlank(it.Lead_Time_Days) || isBlank(it.Estimated_Cost) || isBlank(it.Selling_Price)) missing++;
-        }
-        if (missing) out.push(missing + ' item(s) missing lead time, estimated cost or selling price');
-        return out;
+        return out.concat(itemNeeds(d.items, function (it) {
+          var n = [];
+          if (isBlank(it.Lead_Time_Days)) n.push('Lead Time');
+          if (isBlank(it.Estimated_Cost)) n.push('Estimated Cost');
+          if (isBlank(it.Selling_Price)) n.push('Selling Price');
+          return n;
+        }));
       } },
     { name: 'Move to Executing', from: S3, to: S4, depts: [DEPT.OPS, DEPT.MGMT],
       sets: { 'Execution_Started_At': 'today' },
       check: function (p) { return isBlank(p.PO_No) ? ['PO Number is empty'] : []; } },
     { name: 'Move to Waiting for Payment', from: S4, to: S5, depts: [DEPT.OPS, DEPT.MGMT],
       check: function (p, d) {
-        var missing = 0;
-        for (var i = 0; i < d.items.length; i++) {
-          if (!isTrue(d.items[i].Delivered) || isBlank(d.items[i].Execution_Photos)) missing++;
-        }
-        return missing ? [missing + ' item(s) not delivered or without an execution photo'] : [];
+        return itemNeeds(d.items, function (it) {
+          var n = [];
+          if (!isTrue(it.Delivered)) n.push('mark as Delivered');
+          if (isBlank(it.Execution_Photos)) n.push('add an execution photo');
+          return n;
+        });
       } },
     { name: 'Move to Done', from: S5, to: S6, depts: [DEPT.BD, DEPT.MGMT],
       check: function (p, d) {
@@ -352,6 +371,9 @@ var BGS = (function () {
         return out;
       } }
   ];
+
+  /* Department names for "who may do this" notes. */
+  function deptNames(list) { return list.join(' or '); }
 
   /* The next move for a project, with whether this user may do it now. */
   function nextMove(project, user, data) {
@@ -403,7 +425,7 @@ var BGS = (function () {
     column: column, labelOf: labelOf, stageIndex: stageIndex,
     hiddenColumnsFor: hiddenColumnsFor, canSeeProject: canSeeProject,
     fieldRule: fieldRule, canAdd: canAdd, canDelete: canDelete,
-    customersForCompany: customersForCompany, nextMove: nextMove, moveTo: moveTo, canReject: canReject,
+    customersForCompany: customersForCompany, nextMove: nextMove, deptNames: deptNames, moveTo: moveTo, canReject: canReject,
     isOpenAction: isOpenAction, statusForNewAction: statusForNewAction, statusAfterEdit: statusAfterEdit,
     sellingPriceRule: sellingPriceRule, bdProjectName: bdProjectName
   };

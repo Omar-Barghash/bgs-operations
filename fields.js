@@ -1,7 +1,7 @@
 /* Forms and field display, driven by the table definitions and the shared
  * rules in shared.js: a field appears, is editable, or is required exactly
  * when the rules say so, for this user and this stage. */
-import { h, iconEl, fmtDate, fmtMoney, fmtNumber, toast } from './ui.js';
+import { h, iconEl, fmtDate, fmtMoney, fmtNumber, toast, formDialog } from './ui.js';
 import { model, enqueue, newTempKey, isTemp } from './sync.js';
 import { CONFIG } from './config.js';
 import { openFile } from './files.js';
@@ -12,7 +12,7 @@ const B = window.BGS;
  * "null" in AppSheet means all columns in table order). */
 const FORM_ORDER = {
   'Projects': ['Stage', 'BD Project Name', 'Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'PO_No', 'Invoice#', 'Expected Cash In', 'Documentation_Verified', 'Satisfaction_Completed', 'Rejection Reason', 'Quotation', 'PO', 'Invoice'],
-  'Action Tracker': ['BD Project Name', 'Criticality', 'Action', 'Owner', 'Due Date', 'Estimated Time', 'Location', 'Status', 'Created at']
+  'Action Tracker': ['Project #', 'BD Project Name', 'Criticality', 'Action', 'Owner', 'Due Date', 'Estimated Time', 'Location', 'Status', 'Created at']
 };
 export function formColumns(table) { return FORM_ORDER[table] || B.SCHEMA[table].columns.map(c => c.name); }
 
@@ -131,6 +131,9 @@ async function shrinkImage(file) {
 
 /* ---------- the form ---------- */
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const NEW = '__add_new__';
+/* Lists that can be added to from inside a form (Omar, 5 Oct 2026). */
+const ADDABLE = { 'Customers': true, 'Lists': true, 'Item Type': true };
 
 /**
  * renderForm({table, record, isNew, context, onDone})
@@ -204,7 +207,16 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
         input = h('select', { id, onchange: e => set(e.target.value) }, h('option', { value: '' }, '—'), c.values.map(o => h('option', { value: o, selected: o === v }, o)));
         break;
       case 'ref':
-        input = refSelect(id, c, v, (val) => { set(val); if (table === 'Projects' && col === 'Company') { values.Customer = ''; draw(); } });
+        input = refSelect(id, c, v, (val) => {
+          set(val);
+          if (table === 'Projects' && col === 'Company') { values.Customer = ''; draw(); }
+          if (table === 'Action Tracker' && col === 'Project #') {
+            const p = B.isBlank(val) ? null : findRecord('Projects', val);
+            values['BD Project Name'] = p ? p['BD Project Name'] : '';
+            values.Criticality = p ? p.Criticality : '';
+            draw();
+          }
+        });
         break;
       case 'email':
         input = h('input', { id, class: 'input', type: 'email', autocomplete: 'off', value: v ?? '', oninput: e => set(e.target.value.trim()) }); break;
@@ -232,16 +244,58 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
     let opts = [];
     if (c.ref === 'Customers' && table === 'Projects') opts = B.customersForCompany(values.Company, model.view.Customers).map(r => [r.Customer, r.Customer]);
     else if (c.ref === 'Projects') opts = model.view.Projects.slice().sort((a, b) => Number(b['P#']) - Number(a['P#'])).map(r => [r['P#'], r['BD Project Name'] || r['Project Name'] || r['P#']]);
+    else if (c.ref === 'Users') opts = model.view.Users.filter(u => u.Active !== false && !B.same(u.Active, 'Inactive') && !B.isBlank(u.Name)).map(u => [u.Name, u.Name]).sort((a, b) => a[1].localeCompare(b[1]));
     else {
       const t = B.SCHEMA[c.ref];
       opts = model.view[c.ref].map(r => [r[t.key], r[t.key]]).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
     }
     const has = opts.some(o => String(o[0]) === String(v));
-    const sel = h('select', { id, onchange: e => onPick(e.target.value) },
-      h('option', { value: '' }, c.ref === 'Customers' && B.isBlank(values.Company) ? 'Choose a company first' : '—'),
+    const blankText = c.ref === 'Customers' && B.isBlank(values.Company) ? 'Choose a company first'
+      : (table === 'Action Tracker' && c.name === 'Project #') ? 'No project (general action)'
+      : (table === 'Action Tracker' && c.name === 'Owner') ? 'Me' : '—';
+    const addable = ADDABLE[c.ref] && B.canAdd(c.ref, model.user);
+    const sel = h('select', { id, onchange: async e => {
+        if (e.target.value !== NEW) { onPick(e.target.value); return; }
+        e.target.value = v ?? '';
+        const key = await addNew(c.ref);
+        if (key) { onPick(key); draw(); }
+      } },
+      h('option', { value: '' }, blankText),
       !has && !B.isBlank(v) ? h('option', { value: v, selected: true }, String(v) + ' (not in list)') : null,
-      opts.map(([val, lab]) => h('option', { value: val, selected: String(val) === String(v) }, String(lab))));
+      opts.map(([val, lab]) => h('option', { value: val, selected: String(val) === String(v) }, String(lab))),
+      addable ? h('option', { value: NEW }, '+ Add new ' + humanTable(c.ref) + '…') : null);
     return sel;
+  }
+
+  /* Add a company, customer or item category from inside a form, then select it.
+   * It is saved like any other change (works offline, sent in order before this form). */
+  async function addNew(ref) {
+    let fields;
+    if (ref === 'Customers') {
+      const company = values.Company;
+      if (B.isBlank(company)) { toast('Choose the company first, then add its customer.', { error: true }); return null; }
+      const r = await formDialog({ title: 'New customer', message: 'For ' + company + '.', confirmText: 'Add customer',
+        fields: [{ name: 'Customer', label: 'Customer name', required: true }] });
+      if (!r) return null;
+      fields = { Customer: r.Customer, Company: company, Active: true };
+    } else if (ref === 'Lists') {
+      const r = await formDialog({ title: 'New company', confirmText: 'Add company',
+        fields: [{ name: 'Company', label: 'Company name', required: true },
+                 { name: 'Company Code', label: 'Company code', required: true, hint: 'Short code used in project names, e.g. HO for Henkel OCT.' }] });
+      if (!r) return null;
+      fields = { Company: r.Company, 'Company Code': r['Company Code'] };
+    } else if (ref === 'Item Type') {
+      const r = await formDialog({ title: 'New item category', confirmText: 'Add category',
+        fields: [{ name: 'Item_Type', label: 'Item category', required: true }] });
+      if (!r) return null;
+      fields = { Item_Type: r.Item_Type };
+    } else return null;
+    const keyCol = B.SCHEMA[ref].key;
+    const existing = findRecord(ref, fields[keyCol]);
+    if (existing) { toast('"' + existing[keyCol] + '" already exists. It is now selected.'); return existing[keyCol]; }
+    await enqueue({ op: 'create', table: ref, fields }, 'New ' + humanTable(ref) + ': ' + fields[keyCol]);
+    toast('Added ' + humanTable(ref) + ' "' + fields[keyCol] + '".');
+    return fields[keyCol];
   }
 
   function validate() {
@@ -276,7 +330,7 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
     let key;
     if (isNew) {
       const tempKey = newTempKey();
-      Object.assign(fields, context);
+      for (const k of Object.keys(context)) { if (!(k in fields) && !(B.column(table, k) && ruleFor(table, k, values, isNew).editable)) fields[k] = context[k]; }
       await enqueue({ op: 'create', table, tempKey, fields }, 'New ' + humanTable(table) + (fields['Project Name'] || fields.Item_Name || fields.Action ? ': ' + (fields['Project Name'] || fields.Item_Name || fields.Action) : ''));
       key = def.columns.find(c => c.name === def.key).auto ? tempKey : fields[def.key];
     } else {

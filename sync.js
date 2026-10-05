@@ -139,7 +139,7 @@ function applyLocal(t, ch) {
       rec.Selling_Price = B.sellingPriceRule(rec);
     } else if (ch.table === 'Action Tracker') {
       const p = B.isBlank(rec['Project #']) ? null : findIn(t, 'Projects', rec['Project #']);
-      Object.assign(rec, { 'Action #': k, Owner: u.name, 'Project #': p ? p['P#'] : 0,
+      Object.assign(rec, { 'Action #': k, Owner: B.isBlank(rec.Owner) ? u.name : rec.Owner, 'Project #': p ? p['P#'] : 0,
         'BD Project Name': p ? p['BD Project Name'] : '', Criticality: p ? p.Criticality : '' });
       if (B.isBlank(rec['Created at'])) rec['Created at'] = today;
       if (B.isBlank(rec['Due Date'])) rec['Due Date'] = today;

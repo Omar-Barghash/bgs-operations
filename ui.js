@@ -110,6 +110,40 @@ export function promptDialog({ title, message, label, confirmText = 'Save', requ
   });
 }
 
+/** A small form in a dialog. fields: [{name, label, required, hint}].
+ * Resolves to {name: value} or null when cancelled. */
+export function formDialog({ title, message, fields, confirmText = 'Save' }) {
+  return openSheet((sheet, close) => {
+    const inputs = {}, errs = {};
+    const rows = fields.map(f => {
+      inputs[f.name] = h('input', { class: 'input', autocomplete: 'off', 'aria-label': f.label });
+      errs[f.name] = h('div', { class: 'error-text', hidden: true });
+      return h('div', { class: 'field' }, h('label', { class: 'lbl' }, f.label, f.required ? h('span', { class: 'req' }, ' *') : null),
+        inputs[f.name], f.hint ? h('div', { class: 'hint' }, f.hint) : null, errs[f.name]);
+    });
+    const submit = () => {
+      const out = {}; let bad = null;
+      fields.forEach(f => {
+        const v = inputs[f.name].value.trim(); out[f.name] = v;
+        const missing = f.required && !v;
+        errs[f.name].hidden = !missing; errs[f.name].textContent = missing ? f.label + ' is required.' : '';
+        inputs[f.name].classList.toggle('invalid', missing);
+        if (missing && !bad) bad = inputs[f.name];
+      });
+      if (bad) { bad.focus(); return; }
+      close(out);
+    };
+    sheet.append(...[
+      h('h3', null, title),
+      message ? h('p', null, message) : null,
+      h('form', { class: 'form', style: 'padding:0', novalidate: true, onsubmit: e => { e.preventDefault(); submit(); } }, rows, h('button', { type: 'submit', hidden: true })),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => close(null) }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: submit }, confirmText))
+    ].filter(Boolean));
+  });
+}
+
 export function menuSheet(title, items) {
   return openSheet((sheet, close) => {
     sheet.append(h('h3', null, title), h('ul', { class: 'menu-list' }, items.filter(Boolean).map(it =>
