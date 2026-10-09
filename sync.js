@@ -113,6 +113,9 @@ function singular(t) {
 export function rebuildView() {
   const v = clone(model.snapshot);
   model.outbox.filter(c => c.state !== 'refused').forEach(c => { try { applyLocal(v, c); } catch (e) { console.warn('Could not preview change', c, e); } });
+  // Open actions past their due date show as Late straight away (also offline, also overnight).
+  const today = localToday();
+  v['Action Tracker'].forEach(a => { a.Status = B.statusAfterEdit(a, today); });
   model.view = v;
 }
 
@@ -169,6 +172,11 @@ function applyLocal(t, ch) {
     if (m && m.sets && m.sets.Execution_Started_At) r.Execution_Started_At = today;
     mark(r);
     t.Stage_History.push(mark({ History_ID: 'tmp-h-' + ch.id.slice(0, 8), Project_ID: r['P#'], From_Stage: from, To_Stage: ch.to, Changed_By: u.name, Changed_At: now, Comment: '' }));
+  } else if (ch.op === 'back') {
+    const r = findIn(t, 'Projects', ch.key); if (!r) return;
+    const from = r.Stage, prev = B.previousStage(r); if (!prev) return;
+    r.Stage = prev; mark(r);
+    t.Stage_History.push(mark({ History_ID: 'tmp-h-' + ch.id.slice(0, 8), Project_ID: r['P#'], From_Stage: from, To_Stage: prev, Changed_By: u.name, Changed_At: now, Comment: '' }));
   } else if (ch.op === 'reject') {
     const r = findIn(t, 'Projects', ch.key); if (!r) return;
     const from = r.Stage;

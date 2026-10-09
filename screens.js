@@ -10,6 +10,7 @@ import { CONFIG } from './config.js';
 const B = window.BGS;
 const S = B.S;
 const sameKey = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+let navList = { keys: [], from: '#/active' };
 const ui = { active: { q: '', sel: null, open: {} }, all: { q: '', sel: null, open: {} }, actions: { tab: 'mine', q: '' } };
 
 /* ================= shared pieces ================= */
@@ -64,20 +65,27 @@ export function projectsScreen(mode) {
   const st = ui[mode];
   const node = h('div');
   const isActive = mode === 'active';
+  // The search box is built once and never redrawn, so the phone keyboard stays open while typing.
+  const selBtn = h('button', { class: 'btn small', onclick: () => { st.sel = st.sel ? null : new Set(); draw(); } });
+  const body = h('div');
+  node.append(h('div', { class: 'toolbar' }, searchBox(st, 'Search projects', () => draw()), selBtn), body);
   function draw() {
-    node.innerHTML = '';
+    selBtn.textContent = st.sel ? 'Done' : 'Select';
+    selBtn.setAttribute('aria-pressed', st.sel ? 'true' : 'false');
+    body.innerHTML = '';
     let list = model.view.Projects.filter(p => isActive ? !B.inList(p.Stage, [S.S6, S.S7]) : true);
     list = list.filter(p => matches(p, PROJECT_SEARCH, st.q)).sort((a, b) => (Number(a['P#']) || 1e9) - (Number(b['P#']) || 1e9));
-    const tools = h('div', { class: 'toolbar' }, searchBox(st, 'Search projects', draw),
-      h('button', { class: 'btn small', 'aria-pressed': st.sel ? 'true' : 'false', onclick: () => { st.sel = st.sel ? null : new Set(); draw(); } }, st.sel ? 'Done' : 'Select'));
-    node.append(tools);
+    const groups = isActive ? [S.S1, S.S2, S.S3, S.S4, S.S5] : B.STAGES;
+    // remember the order shown, so the project screen can swipe to the next / previous one
+    navList = { keys: [], from: isActive ? '#/active' : '#/projects' };
+    groups.forEach(stage => list.filter(p => B.same(p.Stage, stage)).forEach(p => navList.keys.push(String(p['P#']))));
+    if (!isActive) list.filter(p => !B.inList(p.Stage, groups)).forEach(p => navList.keys.push(String(p['P#'])));
     if (!list.length) {
-      node.append(model.lastSync || model.view.Projects.length
+      body.append(model.lastSync || model.view.Projects.length
         ? emptyState(st.q ? 'No matching projects' : 'No active projects', st.q ? 'Try a different word, or clear the search.' : 'Add a project to start the pipeline.')
         : emptyState('Loading projects', 'The first download can take a few seconds.'));
       return;
     }
-    const groups = isActive ? [S.S1, S.S2, S.S3, S.S4, S.S5] : B.STAGES;
     groups.forEach(stage => {
       const rows = list.filter(p => B.same(p.Stage, stage));
       if (!rows.length) return;
@@ -87,12 +95,12 @@ export function projectsScreen(mode) {
         h('div', { class: 'group-head' }, stageShort(stage), h('span', { class: 'count' }, String(rows.length)),
           big ? h('button', { class: 'btn link', onclick: () => { st.open[stage] = !open; draw(); } }, open ? 'Hide' : 'Show all') : null));
       if (open) g.append(h('div', { class: 'list' }, rows.map(p => projectRow(p, st, draw))));
-      node.append(g);
+      body.append(g);
     });
     // anything with an unknown stage still shows, at the end
     const odd = list.filter(p => !B.inList(p.Stage, groups));
-    if (odd.length && !isActive) node.append(h('section', { class: 'group' }, h('div', { class: 'group-head' }, 'Other', h('span', { class: 'count' }, String(odd.length))), h('div', { class: 'list' }, odd.map(p => projectRow(p, st, draw)))));
-    if (st.sel) node.append(bulkBar(st, draw));
+    if (odd.length && !isActive) body.append(h('section', { class: 'group' }, h('div', { class: 'group-head' }, 'Other', h('span', { class: 'count' }, String(odd.length))), h('div', { class: 'list' }, odd.map(p => projectRow(p, st, draw)))));
+    if (st.sel) body.append(bulkBar(st, draw));
   }
   draw();
   return {
@@ -142,13 +150,57 @@ function bulkBar(st, redraw) {
 
 const PROJECT_DETAIL = ['Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'Quotation', 'PO_No', 'PO', 'Invoice#', 'Invoice', 'Expected Cash In', 'Rejection Reason', 'Documentation_Verified', 'Satisfaction_Completed'];
 
+/* Swipe left / right on a project to open the next / previous one (Omar, 9 Oct 2026).
+ * The order is the list the project was opened from (Active or Projects, with any
+ * search applied). Opened from elsewhere: the Active order (or all projects for a
+ * Done/Rejected one). */
+function neighbours(key) {
+  let keys = navList.keys;
+  if (!keys.includes(String(key))) {
+    const p = findRecord('Projects', key);
+    const active = p && !B.inList(p.Stage, [S.S6, S.S7]);
+    keys = model.view.Projects.filter(x => active ? !B.inList(x.Stage, [S.S6, S.S7]) : true)
+      .sort((a, b) => (B.stageIndex(a.Stage) || 99) - (B.stageIndex(b.Stage) || 99) || (Number(a['P#']) || 1e9) - (Number(b['P#']) || 1e9))
+      .map(x => String(x['P#']));
+  }
+  const i = keys.indexOf(String(key));
+  return { i, n: keys.length, prev: i > 0 ? keys[i - 1] : null, next: i >= 0 && i < keys.length - 1 ? keys[i + 1] : null };
+}
+let slideFrom = null;
+function goProject(target, dir) {
+  slideFrom = dir;
+  location.replace('#/p/' + encodeURIComponent(target));
+}
+
 export function projectScreen(key) {
-  const node = h('div');
+  const node = h('div', { class: 'swipe-area' });
+  if (slideFrom) { node.classList.add(slideFrom === 'next' ? 'slide-from-right' : 'slide-from-left'); slideFrom = null; }
+  // swipe gesture (ignored when it starts in a text field or drop-down)
+  let sx = null, sy = 0, t0 = 0;
+  node.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || e.target.closest('input, textarea, select')) { sx = null; return; }
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; t0 = Date.now();
+  }, { passive: true });
+  node.addEventListener('touchend', e => {
+    if (sx === null) return;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; sx = null;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy) || Date.now() - t0 > 700) return;
+    const nb = neighbours(key), dir = dx < 0 ? 'next' : 'prev';
+    if (nb[dir]) goProject(nb[dir], dir);
+    else toast(dir === 'next' ? 'This is the last project in the list.' : 'This is the first project in the list.');
+  }, { passive: true });
   function draw() {
     node.innerHTML = '';
     const p = findRecord('Projects', key);
     if (!p) { node.append(emptyState('Project not found', 'It may be hidden from you, or it was removed. Open More, then Sync, and tap Sync now.')); return; }
     const pnum = p['P#'];
+    const nb = neighbours(key);
+    if (nb.i >= 0 && nb.n > 1) {
+      node.append(h('div', { class: 'pager', role: 'navigation', 'aria-label': 'Other projects in this list' },
+        h('button', { class: 'icon-btn', 'aria-label': 'Previous project', disabled: !nb.prev, html: icon.back, onclick: () => nb.prev && goProject(nb.prev, 'prev') }),
+        h('span', null, (nb.i + 1) + ' of ' + nb.n),
+        h('button', { class: 'icon-btn flip', 'aria-label': 'Next project', disabled: !nb.next, html: icon.back, onclick: () => nb.next && goProject(nb.next, 'next') })));
+    }
     const data = projectData(pnum);
     const nm = B.nextMove(p, model.user, data);
     const tempNote = isTemp(pnum) ? h('div', { class: 'banner info' }, 'This project was created on this phone. It gets its P# when it syncs.') : null;
@@ -180,6 +232,14 @@ export function projectScreen(key) {
           h('div', { class: 'needs-title' }, 'Still needed before "' + nm.move.name + '"'),
           h('ul', null, lines.map(t => h('li', null, t))));
       }
+    }
+    const prev = isTemp(pnum) ? null : B.previousStage(p);
+    if (prev) {
+      bar.append(h('button', { class: 'btn step-back', onclick: async () => {
+        if (!await confirmDialog({ title: 'Move back to ' + stageShort(prev) + '?', message: 'The project goes back from ' + stageShort(p.Stage) + ' to ' + stageShort(prev) + '. This is recorded in the stage history.', confirmText: 'Move back' })) return;
+        await enqueue({ op: 'back', table: 'Projects', key: pnum, from: p.Stage, to: prev }, 'Move project ' + (p['BD Project Name'] || pnum) + ' back to ' + stageShort(prev));
+        toast('Moved back to ' + stageShort(prev) + '.');
+      } }, iconEl('back'), 'Back to ' + stageShort(prev)));
     }
     bar.append(h('a', { class: 'btn', href: '#/edit/Projects/' + encodeURIComponent(pnum) }, iconEl('edit'), 'Edit'));
     if (B.canReject(p)) {
@@ -224,7 +284,7 @@ export function projectScreen(key) {
     }
   }
   draw();
-  return { title: 'Project', back: '#/active', node, live: true, redraw: draw };
+  return { title: 'Project', back: navList.keys.includes(String(key)) ? navList.from : '#/active', node, live: true, redraw: draw };
 }
 
 function stageTrack(p) {
@@ -297,29 +357,67 @@ function actionRow(a, showOwner) {
 export function actionsScreen() {
   const st = ui.actions;
   const node = h('div');
+  const tabBtn = (tab, label) => h('button', { 'aria-pressed': 'false', onclick: () => { st.tab = tab; draw(); } }, label);
+  const mineBtn = tabBtn('mine', 'My Actions'), allBtn = tabBtn('all', 'All Actions');
+  const body = h('div');
+  // search box built once (keeps the phone keyboard open while typing)
+  node.append(h('div', { class: 'segmented', role: 'group' }, mineBtn, allBtn), h('div', { class: 'toolbar' }, searchBox(st, 'Search actions', () => draw())), body);
   function draw() {
-    node.innerHTML = '';
-    node.append(h('div', { class: 'segmented', role: 'group' },
-      h('button', { 'aria-pressed': st.tab === 'mine' ? 'true' : 'false', onclick: () => { st.tab = 'mine'; draw(); } }, 'My Actions'),
-      h('button', { 'aria-pressed': st.tab === 'all' ? 'true' : 'false', onclick: () => { st.tab = 'all'; draw(); } }, 'All Actions')));
-    node.append(h('div', { class: 'toolbar' }, searchBox(st, 'Search actions', draw)));
+    mineBtn.setAttribute('aria-pressed', st.tab === 'mine' ? 'true' : 'false');
+    allBtn.setAttribute('aria-pressed', st.tab === 'all' ? 'true' : 'false');
+    body.innerHTML = '';
     const me = model.user ? model.user.name : '';
     // SOURCE: slices "My Actions" and "All Actions" (open = not Completed and not Closed)
     let rows = model.view['Action Tracker'].filter(a => B.isOpenAction(a) && matches(a, ACTION_SEARCH, st.q));
     if (st.tab === 'mine') {
+      body.append(hoursByLocation(st, me, draw));
       rows = rows.filter(a => B.same(a.Owner, me)).sort((a, b) => String(a['Due Date']).localeCompare(String(b['Due Date'])));
-      node.append(rows.length ? h('div', { class: 'list', style: 'margin-top:12px' }, rows.map(a => actionRow(a, false))) : emptyState('Nothing on your list', st.q ? 'No open actions match the search.' : 'Open actions assigned to you appear here.'));
+      body.append(rows.length ? h('div', { class: 'list', style: 'margin-top:12px' }, rows.map(a => actionRow(a, false))) : emptyState('Nothing on your list', st.q ? 'No open actions match the search.' : 'Open actions assigned to you appear here.'));
     } else {
       const owners = [...new Set(rows.map(a => a.Owner || ''))].sort((a, b) => a.localeCompare(b));
-      if (!rows.length) node.append(emptyState('No open actions', st.q ? 'No actions match the search.' : ''));
+      if (!rows.length) body.append(emptyState('No open actions', st.q ? 'No actions match the search.' : ''));
       owners.forEach(o => {
         const mine = rows.filter(a => (a.Owner || '') === o);
-        node.append(h('section', { class: 'group' }, h('div', { class: 'group-head' }, o || 'No owner', h('span', { class: 'count' }, String(mine.length))), h('div', { class: 'list' }, mine.map(a => actionRow(a, false)))));
+        body.append(h('section', { class: 'group' }, h('div', { class: 'group-head' }, o || 'No owner', h('span', { class: 'count' }, String(mine.length))), h('div', { class: 'list' }, mine.map(a => actionRow(a, false)))));
       });
     }
   }
   draw();
   return { title: 'Actions', node, live: true, redraw: draw, fab: { label: 'Add action', href: '#/new/Action%20Tracker' } };
+}
+
+/* Open hours by location (Omar, 9 Oct 2026): the estimated hours of a person's
+ * open actions, added up per location. Everyone sees their own; Management can
+ * pick any person. Actions without an estimate are counted but add no hours. */
+function hoursByLocation(st, me, redraw) {
+  const isMgmt = model.perms && model.perms.manageUsers;
+  const who = isMgmt && st.hoursFor ? st.hoursFor : me;
+  const open = model.view['Action Tracker'].filter(a => B.isOpenAction(a) && B.same(a.Owner, who));
+  const byLoc = new Map();
+  let total = 0, noEstimate = 0;
+  open.forEach(a => {
+    const loc = B.isBlank(a.Location) ? 'No location' : String(a.Location).trim();
+    const n = Number(a['Estimated Time']);
+    const hrs = B.isBlank(a['Estimated Time']) || isNaN(n) ? 0 : n;
+    if (B.isBlank(a['Estimated Time']) || isNaN(n)) noEstimate++;
+    const g = byLoc.get(loc) || { hrs: 0, count: 0, late: 0 };
+    g.hrs += hrs; g.count++; if (/late/i.test(a.Status)) g.late++;
+    byLoc.set(loc, g); total += hrs;
+  });
+  const fmtH = x => (Math.round(x * 10) / 10).toLocaleString('en-GB') + ' h';
+  const picker = isMgmt ? h('select', { class: 'hours-who', 'aria-label': 'Show hours for', onchange: e => { st.hoursFor = e.target.value; redraw(); } },
+    model.view.Users.filter(u => u.Active !== false && !B.same(u.Active, 'Inactive') && !B.isBlank(u.Name)).map(u => u.Name).sort()
+      .map(n => h('option', { value: n, selected: B.same(n, who) }, B.same(n, me) ? n + ' (me)' : n))) : null;
+  const rows = [...byLoc.entries()].sort((a, b) => b[1].hrs - a[1].hrs || a[0].localeCompare(b[0]));
+  return h('section', { class: 'hours', 'aria-label': 'Open hours by location' },
+    h('div', { class: 'hours-head' }, h('span', null, 'Open hours by location'), picker),
+    rows.length ? h('table', null,
+      h('tbody', null, rows.map(([loc, g]) => h('tr', null,
+        h('th', { scope: 'row' }, loc, h('span', { class: 'hours-sub' }, g.count + ' action' + (g.count === 1 ? '' : 's') + (g.late ? ', ' + g.late + ' late' : ''))),
+        h('td', null, fmtH(g.hrs))))),
+      h('tfoot', null, h('tr', null, h('th', { scope: 'row' }, 'Total', h('span', { class: 'hours-sub' }, open.length + ' open action' + (open.length === 1 ? '' : 's'))), h('td', null, fmtH(total))))) :
+      h('div', { class: 'hours-empty' }, B.same(who, me) ? 'You have no open actions.' : who + ' has no open actions.'),
+    noEstimate ? h('div', { class: 'hours-note' }, noEstimate + ' open action' + (noEstimate === 1 ? ' has' : 's have') + ' no estimated time.') : null);
 }
 
 const ACTION_DETAIL = ['Action', 'BD Project Name', 'Criticality', 'Owner', 'Due Date', 'Location', 'Estimated Time', 'Status', 'Created at'];
@@ -407,13 +505,14 @@ export function tableScreen(table) {
   const def = B.SCHEMA[table];
   const st = tableUi[table] || (tableUi[table] = { q: '' });
   const node = h('div');
+  const body = h('div');
+  node.append(h('div', { class: 'toolbar' }, searchBox(st, 'Search ' + (TABLE_TITLES[table] || table).toLowerCase(), () => draw())), body);
   function draw() {
-    node.innerHTML = '';
-    node.append(h('div', { class: 'toolbar' }, searchBox(st, 'Search ' + (TABLE_TITLES[table] || table).toLowerCase(), draw)));
+    body.innerHTML = '';
     const cols = def.columns.map(c => c.name);
     const rows = model.view[table].filter(r => matches(r, cols, st.q)).sort((a, b) => String(a[def.label] ?? '').localeCompare(String(b[def.label] ?? '')));
-    if (!rows.length) { node.append(emptyState('Nothing here', st.q ? 'No matches.' : '')); return; }
-    node.append(h('div', { class: 'list', style: 'margin-top:12px' }, rows.map(r => h('a', { class: 'row', href: refHref(table, r[def.key]) },
+    if (!rows.length) { body.append(emptyState('Nothing here', st.q ? 'No matches.' : '')); return; }
+    body.append(h('div', { class: 'list', style: 'margin-top:12px' }, rows.map(r => h('a', { class: 'row', href: refHref(table, r[def.key]) },
       h('div', { class: 'main' }, h('div', { class: 'title' }, String(r[def.label] ?? r[def.key])), subLine(table, r))))));
   }
   draw();

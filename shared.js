@@ -392,6 +392,14 @@ var BGS = (function () {
     return null;
   }
 
+  /* Step back one stage (e.g. Pricing -> Approaching).
+   * DECISION (Omar, 9 Oct 2026): anyone may do it, from stages 2-6, no reason
+   * asked; Stage_History records it. Rejected projects cannot step back. */
+  function previousStage(project) {
+    var i = stageIndex(project.Stage);
+    return (i >= 2 && i <= 6) ? STAGES[i - 2] : null;
+  }
+
   /* SOURCE: "Move to Rejected" — anyone, unless stage is 5, 6 or 7. */
   function canReject(project) { return !stageIn(project.Stage, [S5, S6, S7]); }
 
@@ -399,7 +407,12 @@ var BGS = (function () {
   function isOpenAction(a) { return !inList(a.Status, ['Completed', 'Closed']); }
   function statusForNewAction(due, today) { return (!isBlank(due) && norm(due) < today) ? 'Late' : 'In Progress'; }
   function statusAfterEdit(action, today) {
-    if (isOpenAction(action) && !isBlank(action['Due Date']) && /^\d{4}-\d{2}-\d{2}$/.test(norm(action['Due Date'])) && norm(action['Due Date']) < today) return 'Late';
+    var due = norm(action['Due Date']);
+    if (isOpenAction(action) && /^\d{4}-\d{2}-\d{2}$/.test(due)) {
+      if (due < today) return 'Late';
+      // due date moved to today or later: no longer late (SOURCE: Status initial value formula)
+      if (same(action.Status, 'Late')) return 'In Progress';
+    }
     return action.Status;
   }
 
@@ -425,7 +438,7 @@ var BGS = (function () {
     column: column, labelOf: labelOf, stageIndex: stageIndex,
     hiddenColumnsFor: hiddenColumnsFor, canSeeProject: canSeeProject,
     fieldRule: fieldRule, canAdd: canAdd, canDelete: canDelete,
-    customersForCompany: customersForCompany, nextMove: nextMove, deptNames: deptNames, moveTo: moveTo, canReject: canReject,
+    customersForCompany: customersForCompany, nextMove: nextMove, deptNames: deptNames, previousStage: previousStage, moveTo: moveTo, canReject: canReject,
     isOpenAction: isOpenAction, statusForNewAction: statusForNewAction, statusAfterEdit: statusAfterEdit,
     sellingPriceRule: sellingPriceRule, bdProjectName: bdProjectName
   };
