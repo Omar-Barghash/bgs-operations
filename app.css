@@ -362,3 +362,13 @@ details.more[open] > summary::after { content: ' −'; }
 .hours-sub { display: block; color: var(--ink-3); font-size: 12px; font-weight: 400; }
 .hours-empty, .hours-note { color: var(--ink-2); font-size: 14px; }
 .hours-note { margin-top: 6px; color: var(--ink-3); font-size: 12px; }
+.hours-link { cursor: pointer; }
+.hours-link th a { color: inherit; text-decoration: none; }
+.hours-link:hover th a, .hours-link:focus-within th a { text-decoration: underline; }
+.hours-link .chev { display: inline-flex; vertical-align: -4px; margin-left: 4px; color: var(--ink-3); }
+.hours-link .chev svg { width: 16px; height: 16px; transform: scaleX(-1); }
+.loc-stats { display: flex; gap: 10px; margin-top: 12px; }
+.loc-stats > div { flex: 1; background: var(--wash); border-radius: var(--r-md); padding: 10px 12px; }
+.loc-stats strong { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.loc-stats span { color: var(--ink-3); font-size: 12px; }
+.loc-stats .is-late strong { color: var(--red); }

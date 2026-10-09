@@ -17,6 +17,7 @@ let needsLogin = false;
  * #/cs                Customer Satisfaction form (CS roles)
  * #/p/<P#>            project        #/i/<Item #>   item
  * #/a/<Action #>      action         #/r/<table>/<key>  any other record
+ * #/actions/at/<location>?who=<name>   open actions of one person at one location
  * #/t/<table>         list of a reference table
  * #/new/<table>?...   add            #/edit/<table>/<key>  edit
  * #/sync  #/more                                                    */
@@ -33,7 +34,7 @@ function screenFor({ parts, params }) {
   switch (a) {
     case undefined: case '': case 'active': return S.projectsScreen('active');
     case 'projects': return perms.seeAllProjectsMenu ? S.projectsScreen('all') : S.projectsScreen('active');
-    case 'actions': return S.actionsScreen();
+    case 'actions': return b === 'at' ? S.actionsAtScreen(c, params.get('who')) : S.actionsScreen();
     case 'cs': return S.satisfactionScreen();
     case 'p': return S.projectScreen(b);
     case 'i': return S.itemScreen(b);

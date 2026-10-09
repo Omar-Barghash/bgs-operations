@@ -412,12 +412,57 @@ function hoursByLocation(st, me, redraw) {
   return h('section', { class: 'hours', 'aria-label': 'Open hours by location' },
     h('div', { class: 'hours-head' }, h('span', null, 'Open hours by location'), picker),
     rows.length ? h('table', null,
-      h('tbody', null, rows.map(([loc, g]) => h('tr', null,
-        h('th', { scope: 'row' }, loc, h('span', { class: 'hours-sub' }, g.count + ' action' + (g.count === 1 ? '' : 's') + (g.late ? ', ' + g.late + ' late' : ''))),
-        h('td', null, fmtH(g.hrs))))),
-      h('tfoot', null, h('tr', null, h('th', { scope: 'row' }, 'Total', h('span', { class: 'hours-sub' }, open.length + ' open action' + (open.length === 1 ? '' : 's'))), h('td', null, fmtH(total))))) :
+      h('tbody', null, rows.map(([loc, g]) => {
+        const href = locationHref(loc === 'No location' ? NO_LOC : loc, who, me);
+        return h('tr', { class: 'hours-link', onclick: () => { location.hash = href; } },
+          h('th', { scope: 'row' }, h('a', { href }, loc), h('span', { class: 'hours-sub' }, g.count + ' action' + (g.count === 1 ? '' : 's') + (g.late ? ', ' + g.late + ' late' : ''))),
+          h('td', null, fmtH(g.hrs), h('span', { class: 'chev', html: icon.back })));
+      })),
+      h('tfoot', null, h('tr', { class: 'hours-link', onclick: () => { location.hash = locationHref(ALL_LOC, who, me); } },
+        h('th', { scope: 'row' }, h('a', { href: locationHref(ALL_LOC, who, me) }, 'Total'), h('span', { class: 'hours-sub' }, open.length + ' open action' + (open.length === 1 ? '' : 's'))),
+        h('td', null, fmtH(total), h('span', { class: 'chev', html: icon.back }))))) :
       h('div', { class: 'hours-empty' }, B.same(who, me) ? 'You have no open actions.' : who + ' has no open actions.'),
     noEstimate ? h('div', { class: 'hours-note' }, noEstimate + ' open action' + (noEstimate === 1 ? ' has' : 's have') + ' no estimated time.') : null);
+}
+
+/* Tapping a location in "Open hours by location" opens that person's open actions
+ * there (Omar, 9 Oct 2026). NO_LOC = actions without a location; ALL_LOC = every location. */
+const NO_LOC = '-', ALL_LOC = '*';
+function locationHref(loc, who, me) {
+  return '#/actions/at/' + encodeURIComponent(loc) + (B.same(who, me) ? '' : '?who=' + encodeURIComponent(who));
+}
+function sameLocation(a, loc) {
+  if (loc === ALL_LOC) return true;
+  if (loc === NO_LOC) return B.isBlank(a.Location);
+  return B.same(a.Location, loc);
+}
+
+export function actionsAtScreen(loc, whoParam) {
+  const node = h('div');
+  const me = model.user ? model.user.name : '';
+  const isMgmt = model.perms && model.perms.manageUsers;
+  const who = isMgmt && whoParam ? whoParam : me;   // only Management may look at someone else's
+  const place = loc === ALL_LOC ? 'All locations' : loc === NO_LOC ? 'No location' : loc;
+  function draw() {
+    node.innerHTML = '';
+    const rows = model.view['Action Tracker'].filter(a => B.isOpenAction(a) && B.same(a.Owner, who) && sameLocation(a, loc))
+      .sort((a, b) => String(a['Due Date']).localeCompare(String(b['Due Date'])));
+    let hrs = 0, noEst = 0;
+    rows.forEach(a => { const n = Number(a['Estimated Time']); if (B.isBlank(a['Estimated Time']) || isNaN(n)) noEst++; else hrs += n; });
+    const late = rows.filter(a => /late/i.test(a.Status)).length;
+    node.append(h('div', { class: 'hero' },
+      h('h2', { style: 'margin-top:0' }, place),
+      h('div', { class: 'who' }, (B.same(who, me) ? 'My' : who + "'s") + ' open actions'),
+      h('div', { class: 'loc-stats' },
+        h('div', null, h('strong', null, (Math.round(hrs * 10) / 10).toLocaleString('en-GB') + ' h'), h('span', null, 'estimated')),
+        h('div', null, h('strong', null, String(rows.length)), h('span', null, 'open')),
+        h('div', { class: late ? 'is-late' : '' }, h('strong', null, String(late)), h('span', null, 'late'))),
+      noEst ? h('div', { class: 'hours-note' }, noEst + ' of these ' + (noEst === 1 ? 'has' : 'have') + ' no estimated time.') : null));
+    node.append(rows.length ? h('div', { class: 'list', style: 'margin-top:12px' }, rows.map(a => actionRow(a, false)))
+      : emptyState('No open actions here', 'Completed actions are not listed.'));
+  }
+  draw();
+  return { title: place + ' actions', back: '#/actions', node, live: true, redraw: draw, fab: { label: 'Add action', href: '#/new/Action%20Tracker' } };
 }
 
 const ACTION_DETAIL = ['Action', 'BD Project Name', 'Criticality', 'Owner', 'Due Date', 'Location', 'Estimated Time', 'Status', 'Created at'];
