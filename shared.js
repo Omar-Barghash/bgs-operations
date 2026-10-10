@@ -426,6 +426,23 @@ var BGS = (function () {
     return sp;
   }
 
+  /* ---------- Group chat: AI team members (Omar, 10 Oct 2026) ----------
+   * Mentioning one of them ("@Alaa", "@آلاء", "@Claude") turns a message into a
+   * task for them. They answer through an hourly scheduled Claude task. */
+  var AI_MEMBERS = [
+    { name: 'Alaa', role: 'Tasmim graphic designer (AI)', handles: ['alaa', 'آلاء', 'الاء', 'ألاء', 'إلاء'] },
+    { name: 'Claude', role: 'Assistant (AI)', handles: ['claude', 'كلود'] }
+  ];
+  function mentionsIn(text) {
+    var t = String(text || '').toLowerCase(), out = [];
+    AI_MEMBERS.forEach(function (m) {
+      for (var i = 0; i < m.handles.length; i++) {
+        if (t.indexOf('@' + m.handles[i].toLowerCase()) >= 0) { out.push(m.name); return; }
+      }
+    });
+    return out;
+  }
+
   /* SOURCE: BD Project Name initial value */
   function bdProjectName(pnum, companyCode, projectName) {
     return pnum + '. ' + norm(companyCode) + ' - ' + norm(projectName);
@@ -440,6 +457,7 @@ var BGS = (function () {
     fieldRule: fieldRule, canAdd: canAdd, canDelete: canDelete,
     customersForCompany: customersForCompany, nextMove: nextMove, deptNames: deptNames, previousStage: previousStage, moveTo: moveTo, canReject: canReject,
     isOpenAction: isOpenAction, statusForNewAction: statusForNewAction, statusAfterEdit: statusAfterEdit,
-    sellingPriceRule: sellingPriceRule, bdProjectName: bdProjectName
+    sellingPriceRule: sellingPriceRule, bdProjectName: bdProjectName,
+    AI_MEMBERS: AI_MEMBERS, mentionsIn: mentionsIn
   };
 })();

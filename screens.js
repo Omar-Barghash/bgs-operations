@@ -3,6 +3,7 @@
  * live = true means the screen redraws itself when new data arrives
  * (forms are not live, so typing is never interrupted). */
 import { h, iconEl, icon, toast, confirmDialog, promptDialog, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
+import { sendChat, chatView, refreshChat, markChatSeen, onChange } from './sync.js';
 import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp } from './sync.js';
 import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode } from './fields.js';
 import { CONFIG } from './config.js';
@@ -685,4 +686,100 @@ function conflictCard(k) {
     h('div', { class: 'btns' },
       ch.op === 'update' ? h('button', { class: 'btn small primary', onclick: () => keepMine(k.id) }, 'Keep mine') : null,
       h('button', { class: 'btn small', onclick: () => keepTheirs(k.id) }, ch.op === 'update' ? 'Keep theirs' : 'OK')));
+}
+
+/* ================= group chat (Omar, 10 Oct 2026) ================= */
+
+const TASK_LABEL = { 'waiting': 'Waiting', 'in progress': 'Working on it', 'done': 'Done', 'needs approval': 'Needs approval', 'failed': 'Could not do it' };
+let chatPoll = null;
+
+export function chatScreen() {
+  const node = h('div', { class: 'chat' });
+  const me = model.user ? model.user.name : '';
+  const people = model.view.Users.filter(u => u.Active !== false && !B.same(u.Active, 'Inactive') && !B.isBlank(u.Name)).map(u => u.Name);
+  const ai = (model.members && model.members.length ? model.members : B.AI_MEMBERS);
+  const members = h('div', { class: 'chat-members' },
+    people.map(n => h('span', { class: 'mchip' }, n)),
+    ai.map(m => h('span', { class: 'mchip ai', title: m.role }, m.name, h('i', null, 'AI'))));
+  const note = h('div', { class: 'chat-note' }, 'Mention @Alaa or @Claude to give them a task. They check the group every hour while Omar\'s computer is on.');
+  const list = h('div', { class: 'chat-list', role: 'log', 'aria-live': 'polite', 'aria-label': 'Group messages' });
+  const input = h('textarea', { class: 'chat-input', rows: 1, dir: 'auto', placeholder: 'Message the group', 'aria-label': 'Message',
+    oninput: () => grow(), onkeydown: e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } } });
+  const sendBtn = h('button', { class: 'chat-send', 'aria-label': 'Send', html: icon.send, onclick: () => send() });
+  const mention = name => h('button', { class: 'mention-btn', type: 'button', onclick: () => {
+    const pre = input.value && !/\s$/.test(input.value) ? ' ' : '';
+    input.value += pre + '@' + name + ' '; grow(); input.focus();
+  } }, '@' + name);
+  const composer = h('div', { class: 'chat-composer' }, h('div', { class: 'mentions' }, ai.map(m => mention(m.name))), h('div', { class: 'chat-row' }, input, sendBtn));
+  node.append(members, note, list, composer);
+
+  function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; }
+  async function send() {
+    const t = input.value.trim();
+    if (!t) return;
+    input.value = ''; grow();
+    await sendChat(t);
+    draw(true);
+    input.focus();
+  }
+  function nearBottom() { return window.innerHeight + window.scrollY >= document.body.scrollHeight - 160; }
+  function draw(scroll) {
+    const stick = scroll || nearBottom();
+    const msgs = chatView();
+    const byId = new Map(msgs.map(m => [m.Message_ID, m]));
+    list.innerHTML = '';
+    if (!msgs.length) list.append(emptyState('No messages yet', 'Say hello, or mention @Alaa with a design request.'));
+    let day = '';
+    msgs.forEach(m => {
+      const d = String(m.Sent_At).slice(0, 10);
+      if (d !== day) { day = d; list.append(h('div', { class: 'chat-day' }, fmtDate(d))); }
+      list.append(bubble(m, byId, me));
+    });
+    if (stick) requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
+    markChatSeen();
+  }
+  draw(true);
+  // new messages arrive without redrawing the composer (typing is never interrupted)
+  const off = onChange(kind => {
+    if (!document.body.contains(node)) { off(); return; }
+    if (kind === 'chat' || kind === 'change' || kind === 'applied') draw(false);
+  });
+  clearInterval(chatPoll);
+  refreshChat();
+  chatPoll = setInterval(() => {
+    if (!document.body.contains(node)) { clearInterval(chatPoll); return; }
+    if (document.visibilityState === 'visible') refreshChat();
+  }, 15000);
+  return { title: 'Group Chat', node, live: false };
+}
+
+function bubble(m, byId, me) {
+  const time = String(m.Sent_At).slice(11, 16);
+  if (m.Author_Type === 'system') return h('div', { class: 'chat-sys' }, h('span', { dir: 'auto' }, m.Text), h('time', null, time));
+  const mine = m.Author === me && m.Author_Type === 'human';
+  const quoted = m.Reply_To && byId.get(m.Reply_To);
+  const body = h('div', { class: 'chat-text', dir: 'auto' }, linkify(m.Text));
+  return h('div', { class: 'chat-msg' + (mine ? ' mine' : '') + (m.Author_Type === 'ai' ? ' ai' : '') },
+    mine ? null : h('div', { class: 'chat-author' }, m.Author, m.Author_Type === 'ai' ? h('i', null, 'AI') : null),
+    quoted ? h('div', { class: 'chat-quote', dir: 'auto' }, quoted.Author + ': ' + (quoted.Text.length > 90 ? quoted.Text.slice(0, 90) + '…' : quoted.Text)) : null,
+    body,
+    h('div', { class: 'chat-meta' },
+      m.Task_Status ? h('span', { class: 'task-pill t-' + m.Task_Status.replace(/\s/g, '-') }, (m.Mentions || []).join(', ') + ': ' + (TASK_LABEL[m.Task_Status] || m.Task_Status)) : null,
+      m.__refused ? h('span', { class: 'task-pill t-failed' }, 'Not sent: ' + m.__refused) : m.__pending ? h('span', { class: 'sending' }, 'Sending…') : null,
+      h('time', null, time)));
+}
+
+/* Plain text with @mentions highlighted and web links clickable (no HTML from messages is ever run). */
+function linkify(text) {
+  const out = [];
+  const re = /(https?:\/\/[^\s]+)|(@[\w\u0600-\u06FF]+)/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1]) out.push(h('a', { href: m[1], target: '_blank', rel: 'noopener' }, m[1]));
+    else out.push(h('span', { class: B.mentionsIn(m[2]).length ? 'mention ai' : 'mention' }, m[2]));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
 }

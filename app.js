@@ -1,7 +1,7 @@
 /* BGS Operations — start-up, navigation and sign-in. */
 import { h, icon, toast } from './ui.js';
 import { call } from './api.js';
-import { model, onChange, loadFromPhone, signedIn, syncNow, startBackgroundSync, pendingCount, attentionCount } from './sync.js';
+import { model, onChange, loadFromPhone, signedIn, syncNow, startBackgroundSync, pendingCount, attentionCount, unreadChat } from './sync.js';
 import * as S from './screens.js';
 import { CONFIG } from './config.js';
 
@@ -20,6 +20,7 @@ let needsLogin = false;
  * #/actions/at/<location>?who=<name>   open actions of one person at one location
  * #/t/<table>         list of a reference table
  * #/new/<table>?...   add            #/edit/<table>/<key>  edit
+ * #/group            group chat
  * #/sync  #/more                                                    */
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -36,6 +37,7 @@ function screenFor({ parts, params }) {
     case 'projects': return perms.seeAllProjectsMenu ? S.projectsScreen('all') : S.projectsScreen('active');
     case 'actions': return b === 'at' ? S.actionsAtScreen(c, params.get('who')) : S.actionsScreen();
     case 'cs': return S.satisfactionScreen();
+    case 'group': return S.chatScreen();
     case 'p': return S.projectScreen(b);
     case 'i': return S.itemScreen(b);
     case 'a': return S.actionScreen(b);
@@ -66,11 +68,16 @@ function drawTabs() {
     perms.seeAllProjectsMenu ? ['#/projects', 'Projects', icon.archive, 'projects'] : null,
     ['#/active', 'Active', icon.pipeline, 'active'],
     ['#/actions', 'Actions', icon.tasks, 'actions'],
+    ['#/group', 'Group', icon.chat, 'group'],
     perms.seeSatisfactionMenu ? ['#/cs', 'Satisfaction', icon.smile, 'cs'] : null
   ].filter(Boolean);
   const here = parseRoute().parts[0] || 'active';
+  const unread = here === 'group' ? 0 : unreadChat();
   tabbar.innerHTML = '';
-  tabs.forEach(([href, label, ic, id]) => tabbar.append(h('a', { href, 'aria-current': here === id ? 'page' : null }, h('span', { html: ic, style: 'display:inline-flex' }), label)));
+  tabs.forEach(([href, label, ic, id]) => tabbar.append(h('a', { href, 'aria-current': here === id ? 'page' : null },
+    h('span', { html: ic, style: 'display:inline-flex;position:relative' }),
+    label,
+    id === 'group' && unread ? h('b', { class: 'tab-badge', 'aria-label': unread + ' unread' }, unread > 99 ? '99+' : String(unread)) : null)));
 }
 
 function drawPill() {
@@ -120,6 +127,7 @@ onChange((kind, detail) => {
     if (hash.includes(encodeURIComponent(detail.tmp))) location.replace(hash.replace(encodeURIComponent(detail.tmp), encodeURIComponent(detail.real)));
     return;
   }
+  if (kind === 'chat') { if (root.contains(view)) drawTabs(); return; }
   if (kind === 'status') { if (root.contains(view)) { drawPill(); drawBanners(); } return; }
   if (kind === 'change' && root.contains(view)) {
     drawPill(); drawTabs();

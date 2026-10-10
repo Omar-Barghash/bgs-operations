@@ -46,6 +46,8 @@ export const icon = {
   upload: P('<path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/>'),
   arrow: P('<path d="M5 12h14M13 6l6 6-6 6"/>'),
   x: P('<path d="M6 6l12 12M18 6L6 18"/>'),
+  chat: P('<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/>'),
+  send: P('<path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/>'),
   refresh: P('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>')
 };
 export const iconEl = (name, cls) => h('span', { class: cls || 'ic', html: icon[name], style: 'display:inline-flex' });

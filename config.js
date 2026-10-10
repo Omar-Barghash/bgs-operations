@@ -11,7 +11,7 @@ export const CONFIG = {
   API_URL: (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? '/api' : API_URL_PRODUCTION,
 
   // Must match the "version" in sw.js when you publish an update.
-  APP_VERSION: '1.0.4',
+  APP_VERSION: '1.1.0',
 
   // How often the app checks for new data while it is open (minutes).
   SYNC_EVERY_MINUTES: 5,

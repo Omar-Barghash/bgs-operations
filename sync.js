@@ -17,6 +17,9 @@ const B = window.BGS;
 const listeners = new Set();
 
 export const model = {
+  chat: [],        // group chat messages, oldest first (see chat functions at the end)
+  chatSeen: '',    // newest message time this phone has seen in the Group screen
+  members: [],     // AI team members
   token: null,
   user: null,
   perms: {},
@@ -46,10 +49,13 @@ function emit(kind, detail) { listeners.forEach(fn => { try { fn(kind, detail); 
 /* ---------------- start-up and sign-in ---------------- */
 
 export async function loadFromPhone() {
-  const [token, user, perms, snapshot, lastSync, today, outbox, conflicts] = await Promise.all([
+  const [token, user, perms, snapshot, lastSync, today, outbox, conflicts, chat, chatSeen, members] = await Promise.all([
     store.get('token'), store.get('user'), store.get('perms'), store.get('tables'), store.get('lastSync'), store.get('today'),
-    store.outboxAll(), store.conflictsAll()
+    store.outboxAll(), store.conflictsAll(), store.get('chat'), store.get('chatSeen'), store.get('members')
   ]);
+  model.chat = Array.isArray(chat) ? chat : [];
+  model.chatSeen = chatSeen || '';
+  model.members = Array.isArray(members) ? members : [];
   model.token = token || null;
   model.user = user || null;
   model.perms = perms || {};
@@ -74,7 +80,7 @@ export async function signOut() {
   const t = model.token;
   try { if (t) await call('logout', {}, t); } catch (e) { /* signing out locally is enough */ }
   await store.clearAll();
-  Object.assign(model, { token: null, user: null, perms: {}, snapshot: emptyTables(), view: emptyTables(), outbox: [], conflicts: [], lastSync: null, status: 'idle', statusMessage: '' });
+  Object.assign(model, { token: null, user: null, perms: {}, snapshot: emptyTables(), view: emptyTables(), outbox: [], conflicts: [], lastSync: null, status: 'idle', statusMessage: '', chat: [], chatSeen: '', members: [] });
   emit('change');
 }
 
@@ -223,6 +229,8 @@ export function syncNow() {
         throw new ApiError('NETWORK', 'The data download was incomplete. Your data on this phone was kept.');
       }
       model.snapshot = Object.assign(emptyTables(), data.tables);
+      if (Array.isArray(data.chat)) { model.chat = data.chat; await store.set('chat', model.chat); }
+      if (Array.isArray(data.members)) { model.members = data.members; await store.set('members', model.members); }
       model.user = data.user; model.perms = data.perms; model.today = data.today || localToday();
       model.lastSync = new Date().toISOString();
       await Promise.all([store.set('tables', model.snapshot), store.set('user', model.user), store.set('perms', model.perms), store.set('lastSync', model.lastSync), store.set('today', model.today)]);
@@ -258,7 +266,7 @@ async function pushAll() {
     }
     const payload = batch.map(c => {
       const o = { id: c.id, op: c.op, table: c.table };
-      ['key', 'fields', 'orig', 'to', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
+      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data', 'messageId'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
       return o;
     });
     const res = await call('push', { changes: payload }, model.token);
@@ -272,6 +280,7 @@ async function pushAll() {
         (r.records || []).forEach(x => upsert(x.table, x.record));
         (r.deleted || []).forEach(x => removeRecord(x.table, x.key));
         if (r.tempKey && r.key !== undefined) await remapKey(r.tempKey, r.key);
+        if (Array.isArray(r.chat)) await mergeChat(r.chat);
         emit('applied', { change: c, result: r });
       } else if (r.status === 'conflict') {
         progressed = true;
@@ -369,4 +378,64 @@ export function startBackgroundSync() {
     }
   });
   setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, CONFIG.SYNC_EVERY_MINUTES * 60000);
+}
+
+/* ---------------- group chat ---------------- */
+
+/** Send a message. Queued like any change, so it also works offline. */
+export async function sendChat(text) {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  const messageId = 'm' + uuid().replace(/-/g, '').slice(0, 15);
+  return enqueue({ op: 'chat', table: '_Chat', fields: { Text: t }, messageId }, 'Message: ' + (t.length > 40 ? t.slice(0, 40) + '…' : t));
+}
+
+/** Messages to show: the downloaded ones plus this phone's unsent ones. */
+export function chatView() {
+  const have = new Set(model.chat.map(m => m.Message_ID));
+  const mine = model.outbox.filter(c => c.op === 'chat' && !have.has(c.messageId)).map(c => {
+    const mentions = B.mentionsIn(c.fields && c.fields.Text);
+    return { Message_ID: c.messageId, Sent_At: localNow().replace(' ', 'T'), Author: (model.user && model.user.name) || 'Me', Author_Type: 'human',
+      Text: (c.fields && c.fields.Text) || '', Mentions: mentions, Task_Status: mentions.length ? 'waiting' : '', Reply_To: '',
+      __pending: c.state !== 'refused', __refused: c.state === 'refused' ? (c.message || 'Not sent') : null };
+  });
+  return model.chat.concat(mine);
+}
+
+async function mergeChat(list) {
+  if (!list || !list.length) return;
+  const byId = new Map(model.chat.map(m => [m.Message_ID, m]));
+  list.forEach(m => byId.set(m.Message_ID, Object.assign({}, byId.get(m.Message_ID) || {}, m)));
+  model.chat = [...byId.values()].sort((a, b) => String(a.Sent_At).localeCompare(String(b.Sent_At))).slice(-500);
+  await store.set('chat', model.chat);
+  emit('chat');
+}
+
+function newestChatStamp() {
+  let s = '';
+  model.chat.forEach(m => { if (m.Sent_At > s) s = m.Sent_At; if (m.Updated_At && m.Updated_At > s) s = m.Updated_At; });
+  return s;
+}
+
+/** Quick check for new messages (only the chat, not all the data). */
+let chatBusy = false;
+export async function refreshChat() {
+  if (chatBusy || !model.token || navigator.onLine === false) return;
+  chatBusy = true;
+  try {
+    const data = await call('chat', { since: newestChatStamp() }, model.token);
+    if (Array.isArray(data.members)) model.members = data.members;
+    await mergeChat(data.chat || []);
+  } catch (e) { /* the regular sync shows connection problems */ }
+  finally { chatBusy = false; }
+}
+
+/** Messages from others newer than what this phone has seen in the Group screen. */
+export function unreadChat() {
+  const me = model.user ? model.user.name : '';
+  return model.chat.filter(m => m.Sent_At > (model.chatSeen || '') && m.Author !== me && m.Author_Type !== 'system').length;
+}
+export async function markChatSeen() {
+  const s = model.chat.length ? model.chat[model.chat.length - 1].Sent_At : '';
+  if (s && s !== model.chatSeen) { model.chatSeen = s; await store.set('chatSeen', s); emit('chat'); }
 }

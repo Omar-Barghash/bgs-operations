@@ -6,7 +6,7 @@
  * Phones pick up new files automatically when online. When you publish an
  * update, also change VERSION below (and APP_VERSION in config.js) so the
  * saved offline copy is refreshed and phones show "Reload".               */
-const VERSION = '1.0.4';
+const VERSION = '1.1.0';
 const CACHE = 'bgs-ops-' + VERSION;
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'app.css',
