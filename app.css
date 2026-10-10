@@ -444,3 +444,13 @@ details.more[open] > summary::after { content: ' −'; }
 .chat-loc small { font-size: 12px; opacity: .8; }
 .chat-loc small.open { text-decoration: underline; }
 .chat:has(.chat-attach-preview:not([hidden])) { padding-bottom: 240px; }
+
+/* phone notifications (1.3.0) */
+.notif-bar { display: flex; align-items: center; gap: 8px; margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); font-size: 13px; color: var(--ink-2); }
+.notif-bar[hidden] { display: none; }
+.notif-bar > span:first-child { flex: none; display: inline-flex; }
+.notif-bar svg { width: 20px; height: 20px; }
+.notif-bar > span:nth-child(2) { flex: 1; }
+.notif-bar .btn { flex: none; }
+.notif-bar.off { border-color: var(--blue); }
+.notif-bar.on { border-style: dashed; }

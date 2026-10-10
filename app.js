@@ -4,6 +4,8 @@ import { call } from './api.js';
 import { model, onChange, loadFromPhone, signedIn, syncNow, startBackgroundSync, pendingCount, attentionCount, unreadChat } from './sync.js';
 import * as S from './screens.js';
 import { CONFIG } from './config.js';
+import { refreshPush } from './push.js';
+import { refreshChat } from './sync.js';
 
 const B = window.BGS;
 const root = document.getElementById('app');
@@ -211,6 +213,12 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     });
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch(e => console.warn('Offline support unavailable:', e));
+  // from sw.js: a chat alert arrived while the app is on screen, or a notification was tapped
+  navigator.serviceWorker.addEventListener('message', e => {
+    const t = e.data && e.data.type;
+    if (t === 'chat-push') refreshChat();
+    if (t === 'open-group') { location.hash = '#/group'; refreshChat(); }
+  });
 }
 
 /* ---------------- start ---------------- */
@@ -224,6 +232,6 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   }
   render();
   startBackgroundSync();
-  if (model.token) syncNow();
+  if (model.token) { syncNow(); refreshPush(model.token); }
   window.BGS_DEBUG = { model, syncNow, version: CONFIG.APP_VERSION, rules: B };
 })();

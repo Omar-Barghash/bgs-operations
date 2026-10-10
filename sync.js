@@ -12,6 +12,7 @@
 import { call, ApiError } from './api.js';
 import { store } from './store.js';
 import { CONFIG } from './config.js';
+import { disablePush, clearChatNotifications } from './push.js';
 
 const B = window.BGS;
 const listeners = new Set();
@@ -78,6 +79,7 @@ export async function signedIn(token, user) {
 
 export async function signOut() {
   const t = model.token;
+  await disablePush();   // this phone stops getting the group's pop-ups
   try { if (t) await call('logout', {}, t); } catch (e) { /* signing out locally is enough */ }
   await store.clearAll();
   Object.assign(model, { token: null, user: null, perms: {}, snapshot: emptyTables(), view: emptyTables(), outbox: [], conflicts: [], lastSync: null, status: 'idle', statusMessage: '', chat: [], chatSeen: '', members: [] });
@@ -454,4 +456,5 @@ export function unreadChat() {
 export async function markChatSeen() {
   const s = model.chat.length ? model.chat[model.chat.length - 1].Sent_At : '';
   if (s && s !== model.chatSeen) { model.chatSeen = s; await store.set('chatSeen', s); emit('chat'); }
+  if (document.visibilityState === 'visible') clearChatNotifications();
 }

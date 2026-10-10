@@ -4,6 +4,7 @@
  * (forms are not live, so typing is never interrupted). */
 import { h, iconEl, icon, toast, confirmDialog, promptDialog, menuSheet, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
 import { chatFile, openChatFile } from './files.js';
+import { pushStatus, enablePush, disablePush } from './push.js';
 import { sendChat, chatView, refreshChat, markChatSeen, onChange } from './sync.js';
 import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp } from './sync.js';
 import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, readPicked } from './fields.js';
@@ -703,6 +704,29 @@ export function chatScreen() {
     people.map(n => h('span', { class: 'mchip' }, n)),
     ai.map(m => h('span', { class: 'mchip ai', title: m.role }, m.name, h('i', null, 'AI'))));
   const note = h('div', { class: 'chat-note' }, 'Mention @Alaa or @Claude to give them a task. They check the group every hour while Omar\'s computer is on.');
+  const notif = h('div', { class: 'notif-bar', hidden: true });
+  async function drawNotif() {
+    const st = await pushStatus();
+    notif.innerHTML = ''; notif.hidden = st === 'unsupported';
+    notif.className = 'notif-bar ' + st;
+    if (st === 'on') {
+      notif.append(iconEl('bell'), h('span', null, 'Notifications on for this phone'),
+        h('button', { class: 'btn link small', type: 'button', onclick: async () => { await disablePush(); toast('Notifications turned off on this phone.'); drawNotif(); } }, 'Turn off'));
+    } else if (st === 'off') {
+      notif.append(iconEl('bell'), h('span', null, 'Get a pop-up when someone writes, like WhatsApp.'),
+        h('button', { class: 'btn small primary', type: 'button', onclick: async e => {
+          e.target.disabled = true;
+          try { await enablePush(model.token); toast('Notifications are on.'); }
+          catch (x) { toast(x.message, { error: true }); }
+          drawNotif();
+        } }, 'Turn on'));
+    } else if (st === 'blocked') {
+      notif.append(iconEl('bell'), h('span', null, 'Notifications are blocked for this app. To allow them: phone Settings → Apps → Chrome (or the BGS app) → Notifications, or the lock icon next to the address → Notifications → Allow.'));
+    } else if (st === 'ios-install') {
+      notif.append(iconEl('bell'), h('span', null, 'iPhone: to get pop-ups, tap Share → Add to Home Screen, then open BGS Operations from the new icon and come back here.'));
+    }
+  }
+  drawNotif();
   const list = h('div', { class: 'chat-list', role: 'log', 'aria-live': 'polite', 'aria-label': 'Group messages' });
   const input = h('textarea', { class: 'chat-input', rows: 1, dir: 'auto', placeholder: 'Message the group', 'aria-label': 'Message',
     oninput: () => grow(), onkeydown: e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } } });
@@ -756,7 +780,7 @@ export function chatScreen() {
   }
   const composer = h('div', { class: 'chat-composer' }, camIn, photoIn, docIn,
     h('div', { class: 'mentions' }, ai.map(m => mention(m.name))), preview, h('div', { class: 'chat-row' }, attachBtn, input, sendBtn));
-  node.append(members, note, list, composer);
+  node.append(members, note, notif, list, composer);
 
   function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; }
   async function send() {
