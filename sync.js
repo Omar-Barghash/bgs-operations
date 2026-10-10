@@ -259,14 +259,14 @@ async function pushAll() {
     const batch = [];
     let size = 0;
     for (const c of queue) {
-      const s = c.op === 'upload' ? (c.data || '').length : 1000;
+      const s = c.op === 'upload' ? (c.data || '').length : c.file ? (c.file.data || '').length : 1000;
       if (batch.length && (batch.length >= 20 || size + s > 4000000)) break;
       batch.push(c); size += s;
-      if (c.op === 'upload') break; // one file per request
+      if (c.op === 'upload' || c.file) break; // one file per request
     }
     const payload = batch.map(c => {
       const o = { id: c.id, op: c.op, table: c.table };
-      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data', 'messageId'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
+      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data', 'messageId', 'file', 'location'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
       return o;
     });
     const res = await call('push', { changes: payload }, model.token);
@@ -276,6 +276,8 @@ async function pushAll() {
       if (!c) continue;
       if (r.status === 'applied') {
         progressed = true;
+        // keep the sender's own photo/document on the phone (no download needed later)
+        if (c.op === 'chat' && c.file) { try { await store.filePut('chat|' + c.messageId, chatFileEntry(c.file)); } catch (e) { /* only a cache */ } }
         await removeFromOutbox(c);
         (r.records || []).forEach(x => upsert(x.table, x.record));
         (r.deleted || []).forEach(x => removeRecord(x.table, x.key));
@@ -383,12 +385,24 @@ export function startBackgroundSync() {
 /* ---------------- group chat ---------------- */
 
 /** Send a message. Queued like any change, so it also works offline. */
-export async function sendChat(text) {
+/** extra: { file: {name, mimeType, data(base64)}, location: {lat, lng, accuracy} } */
+export async function sendChat(text, extra = {}) {
   const t = String(text || '').trim();
-  if (!t) return null;
+  if (!t && !extra.file && !extra.location) return null;
   const messageId = 'm' + uuid().replace(/-/g, '').slice(0, 15);
-  return enqueue({ op: 'chat', table: '_Chat', fields: { Text: t }, messageId }, 'Message: ' + (t.length > 40 ? t.slice(0, 40) + '…' : t));
+  const change = { op: 'chat', table: '_Chat', fields: { Text: t }, messageId };
+  if (extra.file) change.file = extra.file;
+  if (extra.location) change.location = extra.location;
+  const what = t ? (t.length > 40 ? t.slice(0, 40) + '…' : t) : extra.file ? extra.file.name : 'Location';
+  return enqueue(change, 'Message: ' + what);
 }
+
+/** {name, mimeType, data} → what the file cache keeps */
+export function chatFileEntry(f) {
+  const bytes = Uint8Array.from(atob(f.data), ch => ch.charCodeAt(0));
+  return { name: f.name, mimeType: f.mimeType, blob: new Blob([bytes], { type: f.mimeType }) };
+}
+function locText(l) { return l ? Number(l.lat).toFixed(6) + ',' + Number(l.lng).toFixed(6) + (l.accuracy != null ? ',' + Math.round(l.accuracy) : '') : ''; }
 
 /** Messages to show: the downloaded ones plus this phone's unsent ones. */
 export function chatView() {
@@ -397,6 +411,8 @@ export function chatView() {
     const mentions = B.mentionsIn(c.fields && c.fields.Text);
     return { Message_ID: c.messageId, Sent_At: localNow().replace(' ', 'T'), Author: (model.user && model.user.name) || 'Me', Author_Type: 'human',
       Text: (c.fields && c.fields.Text) || '', Mentions: mentions, Task_Status: mentions.length ? 'waiting' : '', Reply_To: '',
+      Attachment: c.file ? 'local' : '', Attachment_Name: c.file ? c.file.name : '', Attachment_Type: c.file ? c.file.mimeType : '', Location: locText(c.location),
+      __file: c.file || null,
       __pending: c.state !== 'refused', __refused: c.state === 'refused' ? (c.message || 'Not sent') : null };
   });
   return model.chat.concat(mine);

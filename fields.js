@@ -108,7 +108,7 @@ export function filePickerButtons(type, onPicked, verb = 'Upload') {
   return wrap;
 }
 
-async function readPicked(file) {
+export async function readPicked(file) {
   const maxMb = 20;
   if (file.size > maxMb * 1024 * 1024 * 1.5) throw new Error('This file is larger than ' + maxMb + ' MB. Choose a smaller file.');
   let blob = file, name = file.name || 'file', mime = file.type || 'application/octet-stream';

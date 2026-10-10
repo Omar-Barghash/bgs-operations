@@ -2,10 +2,11 @@
  *   { title, back?, node, live, fab? }
  * live = true means the screen redraws itself when new data arrives
  * (forms are not live, so typing is never interrupted). */
-import { h, iconEl, icon, toast, confirmDialog, promptDialog, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
+import { h, iconEl, icon, toast, confirmDialog, promptDialog, menuSheet, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
+import { chatFile, openChatFile } from './files.js';
 import { sendChat, chatView, refreshChat, markChatSeen, onChange } from './sync.js';
 import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp } from './sync.js';
-import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode } from './fields.js';
+import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, readPicked } from './fields.js';
 import { CONFIG } from './config.js';
 
 const B = window.BGS;
@@ -710,15 +711,61 @@ export function chatScreen() {
     const pre = input.value && !/\s$/.test(input.value) ? ' ' : '';
     input.value += pre + '@' + name + ' '; grow(); input.focus();
   } }, '@' + name);
-  const composer = h('div', { class: 'chat-composer' }, h('div', { class: 'mentions' }, ai.map(m => mention(m.name))), h('div', { class: 'chat-row' }, input, sendBtn));
+  // attachments: one photo/document and/or the current location per message (like WhatsApp)
+  let attached = { file: null, location: null };
+  const preview = h('div', { class: 'chat-attach-preview', hidden: true });
+  const picker = (accept, capture) => {
+    const inp = h('input', { type: 'file', accept, hidden: true, capture: capture || null });
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; inp.value = '';
+      if (!f) return;
+      try { attached.file = await readPicked(f); showPreview(); input.focus(); } catch (e) { toast(e.message, { error: true }); }
+    });
+    return inp;
+  };
+  const camIn = picker('image/*', 'environment'), photoIn = picker('image/*'),
+    docIn = picker('application/pdf,image/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.dwg');
+  const attachBtn = h('button', { class: 'chat-attach', type: 'button', 'aria-label': 'Attach photo, document or location', html: icon.clip,
+    onclick: () => menuSheet('Send', [
+      { label: 'Take photo', onClick: () => camIn.click() },
+      { label: 'Photo from gallery', onClick: () => photoIn.click() },
+      { label: 'Document', onClick: () => docIn.click() },
+      { label: 'My current location', onClick: () => getLocation() }
+    ]) });
+  function getLocation() {
+    if (!navigator.geolocation) { toast('This phone cannot share its location.', { error: true }); return; }
+    toast('Finding your location…', { ms: 2500 });
+    navigator.geolocation.getCurrentPosition(
+      p => { attached.location = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }; showPreview(); },
+      e => toast(e.code === 1 ? 'Location is blocked. Allow location for this app in the phone settings.' : 'The location could not be found. Try again outdoors or turn on GPS.', { error: true }),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+  }
+  function showPreview() {
+    preview.innerHTML = '';
+    const chip = (content, onRemove) => h('div', { class: 'attach-chip' }, content,
+      h('button', { type: 'button', class: 'attach-x', 'aria-label': 'Remove', onclick: () => { onRemove(); showPreview(); } }, '×'));
+    if (attached.file) {
+      const f = attached.file;
+      preview.append(chip(/^image\//.test(f.mimeType)
+        ? h('img', { src: 'data:' + f.mimeType + ';base64,' + f.data, alt: f.name })
+        : h('span', { class: 'attach-doc' }, iconEl('file'), f.name), () => { attached.file = null; }));
+    }
+    if (attached.location) preview.append(chip(h('span', { class: 'attach-doc' }, iconEl('pin'), 'Current location'), () => { attached.location = null; }));
+    preview.hidden = !attached.file && !attached.location;
+    input.placeholder = preview.hidden ? 'Message the group' : 'Add a caption (optional)';
+  }
+  const composer = h('div', { class: 'chat-composer' }, camIn, photoIn, docIn,
+    h('div', { class: 'mentions' }, ai.map(m => mention(m.name))), preview, h('div', { class: 'chat-row' }, attachBtn, input, sendBtn));
   node.append(members, note, list, composer);
 
   function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; }
   async function send() {
     const t = input.value.trim();
-    if (!t) return;
+    if (!t && !attached.file && !attached.location) return;
+    const extra = attached;
+    attached = { file: null, location: null }; showPreview();
     input.value = ''; grow();
-    await sendChat(t);
+    await sendChat(t, extra);
     draw(true);
     input.focus();
   }
@@ -758,15 +805,54 @@ function bubble(m, byId, me) {
   if (m.Author_Type === 'system') return h('div', { class: 'chat-sys' }, h('span', { dir: 'auto' }, m.Text), h('time', null, time));
   const mine = m.Author === me && m.Author_Type === 'human';
   const quoted = m.Reply_To && byId.get(m.Reply_To);
-  const body = h('div', { class: 'chat-text', dir: 'auto' }, linkify(m.Text));
+  const body = m.Text ? h('div', { class: 'chat-text', dir: 'auto' }, linkify(m.Text)) : null;
   return h('div', { class: 'chat-msg' + (mine ? ' mine' : '') + (m.Author_Type === 'ai' ? ' ai' : '') },
     mine ? null : h('div', { class: 'chat-author' }, m.Author, m.Author_Type === 'ai' ? h('i', null, 'AI') : null),
     quoted ? h('div', { class: 'chat-quote', dir: 'auto' }, quoted.Author + ': ' + (quoted.Text.length > 90 ? quoted.Text.slice(0, 90) + '…' : quoted.Text)) : null,
+    m.Attachment ? attachmentNode(m) : null,
+    m.Location ? locationNode(m.Location) : null,
     body,
     h('div', { class: 'chat-meta' },
       m.Task_Status ? h('span', { class: 'task-pill t-' + m.Task_Status.replace(/\s/g, '-') }, (m.Mentions || []).join(', ') + ': ' + (TASK_LABEL[m.Task_Status] || m.Task_Status)) : null,
       m.__refused ? h('span', { class: 'task-pill t-failed' }, 'Not sent: ' + m.__refused) : m.__pending ? h('span', { class: 'sending' }, 'Sending…') : null,
       h('time', null, time)));
+}
+
+/* ---- chat attachments ---- */
+const thumbs = new Map();   // Message_ID → picture address (kept while the app is open, so redraws don't flicker)
+function localEntry(m) {
+  if (!m.__file) return null;
+  const bytes = Uint8Array.from(atob(m.__file.data), ch => ch.charCodeAt(0));
+  return { name: m.__file.name, mimeType: m.__file.mimeType, blob: new Blob([bytes], { type: m.__file.mimeType }) };
+}
+function attachmentNode(m) {
+  const isImage = /^image\//.test(m.Attachment_Type);
+  if (!isImage) {
+    return h('button', { type: 'button', class: 'chat-doc', onclick: () => openChatFile(m.Message_ID, localEntry(m)) },
+      iconEl('file'), h('span', { class: 'chat-doc-name', dir: 'auto' }, m.Attachment_Name || 'Document'),
+      h('small', null, docKind(m.Attachment_Name, m.Attachment_Type)));
+  }
+  const img = h('img', { class: 'chat-photo', alt: m.Attachment_Name || 'Photo' });
+  const btn = h('button', { type: 'button', class: 'chat-photo-btn', 'aria-label': 'Open photo', onclick: () => openChatFile(m.Message_ID, localEntry(m)) }, img);
+  if (m.__file) img.src = 'data:' + m.__file.mimeType + ';base64,' + m.__file.data;
+  else if (thumbs.has(m.Message_ID)) img.src = thumbs.get(m.Message_ID);
+  else {
+    btn.classList.add('loading');
+    chatFile(m.Message_ID).then(e => { const u = URL.createObjectURL(e.blob); thumbs.set(m.Message_ID, u); img.src = u; btn.classList.remove('loading'); })
+      .catch(() => { btn.classList.remove('loading'); btn.classList.add('failed'); btn.append(h('span', null, 'Tap to load photo')); });
+  }
+  return btn;
+}
+function docKind(name, type) {
+  const ext = (/\.(\w{1,5})$/.exec(name || '') || [])[1];
+  return ext ? ext.toUpperCase() : (type || 'File');
+}
+function locationNode(loc) {
+  const [lat, lng, acc] = String(loc).split(',');
+  const href = 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng;
+  return h('a', { class: 'chat-loc', href, target: '_blank', rel: 'noopener' },
+    h('span', { class: 'chat-loc-map', html: icon.pin }),
+    h('span', null, h('b', null, 'Location'), h('small', null, Number(lat).toFixed(5) + ', ' + Number(lng).toFixed(5) + (acc ? ' · ±' + acc + ' m' : '')), h('small', { class: 'open' }, 'Open in Maps')));
 }
 
 /* Plain text with @mentions highlighted and web links clickable (no HTML from messages is ever run). */
