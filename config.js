@@ -11,7 +11,12 @@ export const CONFIG = {
   API_URL: (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? '/api' : API_URL_PRODUCTION,
 
   // Must match the "version" in sw.js when you publish an update.
-  APP_VERSION: '1.3.0',
+  APP_VERSION: '1.4.0',
+
+  // Group Chat tab, its notifications and company updates.
+  // DECISION (Omar, 12 Oct 2026): turned OFF. Set to true (and CHAT_ENABLED in
+  // backend/Config.gs) to bring it back; old messages are kept.
+  CHAT_ENABLED: false,
 
   // How often the app checks for new data while it is open (minutes).
   SYNC_EVERY_MINUTES: 5,

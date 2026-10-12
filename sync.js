@@ -438,7 +438,7 @@ function newestChatStamp() {
 /** Quick check for new messages (only the chat, not all the data). */
 let chatBusy = false;
 export async function refreshChat() {
-  if (chatBusy || !model.token || navigator.onLine === false) return;
+  if (!CONFIG.CHAT_ENABLED || chatBusy || !model.token || navigator.onLine === false) return;
   chatBusy = true;
   try {
     const data = await call('chat', { since: newestChatStamp() }, model.token);

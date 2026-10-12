@@ -4,7 +4,7 @@ import { call } from './api.js';
 import { model, onChange, loadFromPhone, signedIn, syncNow, startBackgroundSync, pendingCount, attentionCount, unreadChat } from './sync.js';
 import * as S from './screens.js';
 import { CONFIG } from './config.js';
-import { refreshPush } from './push.js';
+import { refreshPush, disablePush } from './push.js';
 import { refreshChat } from './sync.js';
 
 const B = window.BGS;
@@ -39,7 +39,7 @@ function screenFor({ parts, params }) {
     case 'projects': return perms.seeAllProjectsMenu ? S.projectsScreen('all') : S.projectsScreen('active');
     case 'actions': return b === 'at' ? S.actionsAtScreen(c, params.get('who')) : S.actionsScreen();
     case 'cs': return S.satisfactionScreen();
-    case 'group': return S.chatScreen();
+    case 'group': return CONFIG.CHAT_ENABLED ? S.chatScreen() : S.projectsScreen('active');
     case 'p': return S.projectScreen(b);
     case 'i': return S.itemScreen(b);
     case 'a': return S.actionScreen(b);
@@ -70,11 +70,11 @@ function drawTabs() {
     perms.seeAllProjectsMenu ? ['#/projects', 'Projects', icon.archive, 'projects'] : null,
     ['#/active', 'Active', icon.pipeline, 'active'],
     ['#/actions', 'Actions', icon.tasks, 'actions'],
-    ['#/group', 'Group', icon.chat, 'group'],
+    CONFIG.CHAT_ENABLED ? ['#/group', 'Group', icon.chat, 'group'] : null,
     perms.seeSatisfactionMenu ? ['#/cs', 'Satisfaction', icon.smile, 'cs'] : null
   ].filter(Boolean);
   const here = parseRoute().parts[0] || 'active';
-  const unread = here === 'group' ? 0 : unreadChat();
+  const unread = here === 'group' || !CONFIG.CHAT_ENABLED ? 0 : unreadChat();
   tabbar.innerHTML = '';
   tabs.forEach(([href, label, ic, id]) => tabbar.append(h('a', { href, 'aria-current': here === id ? 'page' : null },
     h('span', { html: ic, style: 'display:inline-flex;position:relative' }),
@@ -216,6 +216,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   // from sw.js: a chat alert arrived while the app is on screen, or a notification was tapped
   navigator.serviceWorker.addEventListener('message', e => {
     const t = e.data && e.data.type;
+    if (!CONFIG.CHAT_ENABLED) return;
     if (t === 'chat-push') refreshChat();
     if (t === 'open-group') { location.hash = '#/group'; refreshChat(); }
   });
@@ -232,6 +233,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   }
   render();
   startBackgroundSync();
-  if (model.token) { syncNow(); refreshPush(model.token); }
+  if (model.token) { syncNow(); if (CONFIG.CHAT_ENABLED) refreshPush(model.token); }
+  if (!CONFIG.CHAT_ENABLED) disablePush();   // chat is off: this phone stops getting its notifications
   window.BGS_DEBUG = { model, syncNow, version: CONFIG.APP_VERSION, rules: B };
 })();
