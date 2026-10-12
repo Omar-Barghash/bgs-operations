@@ -1,11 +1,9 @@
 /* BGS Operations — start-up, navigation and sign-in. */
 import { h, icon, toast } from './ui.js';
 import { call } from './api.js';
-import { model, onChange, loadFromPhone, signedIn, syncNow, startBackgroundSync, pendingCount, attentionCount, unreadChat } from './sync.js';
+import { model, onChange, loadFromPhone, signedIn, syncNow, startBackgroundSync, pendingCount, attentionCount } from './sync.js';
 import * as S from './screens.js';
 import { CONFIG } from './config.js';
-import { refreshPush, disablePush } from './push.js';
-import { refreshChat } from './sync.js';
 
 const B = window.BGS;
 const root = document.getElementById('app');
@@ -22,7 +20,6 @@ let needsLogin = false;
  * #/actions/at/<location>?who=<name>   open actions of one person at one location
  * #/t/<table>         list of a reference table
  * #/new/<table>?...   add            #/edit/<table>/<key>  edit
- * #/group            group chat
  * #/sync  #/more                                                    */
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -39,7 +36,6 @@ function screenFor({ parts, params }) {
     case 'projects': return perms.seeAllProjectsMenu ? S.projectsScreen('all') : S.projectsScreen('active');
     case 'actions': return b === 'at' ? S.actionsAtScreen(c, params.get('who')) : S.actionsScreen();
     case 'cs': return S.satisfactionScreen();
-    case 'group': return CONFIG.CHAT_ENABLED ? S.chatScreen() : S.projectsScreen('active');
     case 'p': return S.projectScreen(b);
     case 'i': return S.itemScreen(b);
     case 'a': return S.actionScreen(b);
@@ -70,16 +66,11 @@ function drawTabs() {
     perms.seeAllProjectsMenu ? ['#/projects', 'Projects', icon.archive, 'projects'] : null,
     ['#/active', 'Active', icon.pipeline, 'active'],
     ['#/actions', 'Actions', icon.tasks, 'actions'],
-    CONFIG.CHAT_ENABLED ? ['#/group', 'Group', icon.chat, 'group'] : null,
     perms.seeSatisfactionMenu ? ['#/cs', 'Satisfaction', icon.smile, 'cs'] : null
   ].filter(Boolean);
   const here = parseRoute().parts[0] || 'active';
-  const unread = here === 'group' || !CONFIG.CHAT_ENABLED ? 0 : unreadChat();
   tabbar.innerHTML = '';
-  tabs.forEach(([href, label, ic, id]) => tabbar.append(h('a', { href, 'aria-current': here === id ? 'page' : null },
-    h('span', { html: ic, style: 'display:inline-flex;position:relative' }),
-    label,
-    id === 'group' && unread ? h('b', { class: 'tab-badge', 'aria-label': unread + ' unread' }, unread > 99 ? '99+' : String(unread)) : null)));
+  tabs.forEach(([href, label, ic, id]) => tabbar.append(h('a', { href, 'aria-current': here === id ? 'page' : null }, h('span', { html: ic, style: 'display:inline-flex' }), label)));
 }
 
 function drawPill() {
@@ -129,7 +120,6 @@ onChange((kind, detail) => {
     if (hash.includes(encodeURIComponent(detail.tmp))) location.replace(hash.replace(encodeURIComponent(detail.tmp), encodeURIComponent(detail.real)));
     return;
   }
-  if (kind === 'chat') { if (root.contains(view)) drawTabs(); return; }
   if (kind === 'status') { if (root.contains(view)) { drawPill(); drawBanners(); } return; }
   if (kind === 'change' && root.contains(view)) {
     drawPill(); drawTabs();
@@ -213,13 +203,6 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     });
     setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch(e => console.warn('Offline support unavailable:', e));
-  // from sw.js: a chat alert arrived while the app is on screen, or a notification was tapped
-  navigator.serviceWorker.addEventListener('message', e => {
-    const t = e.data && e.data.type;
-    if (!CONFIG.CHAT_ENABLED) return;
-    if (t === 'chat-push') refreshChat();
-    if (t === 'open-group') { location.hash = '#/group'; refreshChat(); }
-  });
 }
 
 /* ---------------- start ---------------- */
@@ -233,7 +216,23 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   }
   render();
   startBackgroundSync();
-  if (model.token) { syncNow(); if (CONFIG.CHAT_ENABLED) refreshPush(model.token); }
-  if (!CONFIG.CHAT_ENABLED) disablePush();   // chat is off: this phone stops getting its notifications
+  removeOldChat();
+  if (model.token) syncNow();
   window.BGS_DEBUG = { model, syncNow, version: CONFIG.APP_VERSION, rules: B };
 })();
+
+/* Group Chat was removed in 1.5.0 (Omar, 12 Oct 2026). Phones that used it:
+ * stop its notifications and forget the chat copy kept on the phone. */
+async function removeOldChat() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && reg.pushManager && await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      if (reg && reg.getNotifications) (await reg.getNotifications()).forEach(n => n.close());
+    }
+    if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+    const { store } = await import('./store.js');
+    for (const k of ['chat', 'chatSeen', 'members', 'pushEndpoint', 'pushChecked', 'apiUrl']) await store.del(k);
+  } catch (e) { /* nothing left to clean */ }
+}

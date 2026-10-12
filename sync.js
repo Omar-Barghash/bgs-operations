@@ -12,15 +12,11 @@
 import { call, ApiError } from './api.js';
 import { store } from './store.js';
 import { CONFIG } from './config.js';
-import { disablePush, clearChatNotifications } from './push.js';
 
 const B = window.BGS;
 const listeners = new Set();
 
 export const model = {
-  chat: [],        // group chat messages, oldest first (see chat functions at the end)
-  chatSeen: '',    // newest message time this phone has seen in the Group screen
-  members: [],     // AI team members
   token: null,
   user: null,
   perms: {},
@@ -50,13 +46,10 @@ function emit(kind, detail) { listeners.forEach(fn => { try { fn(kind, detail); 
 /* ---------------- start-up and sign-in ---------------- */
 
 export async function loadFromPhone() {
-  const [token, user, perms, snapshot, lastSync, today, outbox, conflicts, chat, chatSeen, members] = await Promise.all([
+  const [token, user, perms, snapshot, lastSync, today, outbox, conflicts] = await Promise.all([
     store.get('token'), store.get('user'), store.get('perms'), store.get('tables'), store.get('lastSync'), store.get('today'),
-    store.outboxAll(), store.conflictsAll(), store.get('chat'), store.get('chatSeen'), store.get('members')
+    store.outboxAll(), store.conflictsAll()
   ]);
-  model.chat = Array.isArray(chat) ? chat : [];
-  model.chatSeen = chatSeen || '';
-  model.members = Array.isArray(members) ? members : [];
   model.token = token || null;
   model.user = user || null;
   model.perms = perms || {};
@@ -79,10 +72,9 @@ export async function signedIn(token, user) {
 
 export async function signOut() {
   const t = model.token;
-  await disablePush();   // this phone stops getting the group's pop-ups
   try { if (t) await call('logout', {}, t); } catch (e) { /* signing out locally is enough */ }
   await store.clearAll();
-  Object.assign(model, { token: null, user: null, perms: {}, snapshot: emptyTables(), view: emptyTables(), outbox: [], conflicts: [], lastSync: null, status: 'idle', statusMessage: '', chat: [], chatSeen: '', members: [] });
+  Object.assign(model, { token: null, user: null, perms: {}, snapshot: emptyTables(), view: emptyTables(), outbox: [], conflicts: [], lastSync: null, status: 'idle', statusMessage: '' });
   emit('change');
 }
 
@@ -231,8 +223,6 @@ export function syncNow() {
         throw new ApiError('NETWORK', 'The data download was incomplete. Your data on this phone was kept.');
       }
       model.snapshot = Object.assign(emptyTables(), data.tables);
-      if (Array.isArray(data.chat)) { model.chat = data.chat; await store.set('chat', model.chat); }
-      if (Array.isArray(data.members)) { model.members = data.members; await store.set('members', model.members); }
       model.user = data.user; model.perms = data.perms; model.today = data.today || localToday();
       model.lastSync = new Date().toISOString();
       await Promise.all([store.set('tables', model.snapshot), store.set('user', model.user), store.set('perms', model.perms), store.set('lastSync', model.lastSync), store.set('today', model.today)]);
@@ -261,14 +251,14 @@ async function pushAll() {
     const batch = [];
     let size = 0;
     for (const c of queue) {
-      const s = c.op === 'upload' ? (c.data || '').length : c.file ? (c.file.data || '').length : 1000;
+      const s = c.op === 'upload' ? (c.data || '').length : 1000;
       if (batch.length && (batch.length >= 20 || size + s > 4000000)) break;
       batch.push(c); size += s;
-      if (c.op === 'upload' || c.file) break; // one file per request
+      if (c.op === 'upload') break; // one file per request
     }
     const payload = batch.map(c => {
       const o = { id: c.id, op: c.op, table: c.table };
-      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data', 'messageId', 'file', 'location'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
+      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
       return o;
     });
     const res = await call('push', { changes: payload }, model.token);
@@ -278,13 +268,10 @@ async function pushAll() {
       if (!c) continue;
       if (r.status === 'applied') {
         progressed = true;
-        // keep the sender's own photo/document on the phone (no download needed later)
-        if (c.op === 'chat' && c.file) { try { await store.filePut('chat|' + c.messageId, chatFileEntry(c.file)); } catch (e) { /* only a cache */ } }
         await removeFromOutbox(c);
         (r.records || []).forEach(x => upsert(x.table, x.record));
         (r.deleted || []).forEach(x => removeRecord(x.table, x.key));
         if (r.tempKey && r.key !== undefined) await remapKey(r.tempKey, r.key);
-        if (Array.isArray(r.chat)) await mergeChat(r.chat);
         emit('applied', { change: c, result: r });
       } else if (r.status === 'conflict') {
         progressed = true;
@@ -382,79 +369,4 @@ export function startBackgroundSync() {
     }
   });
   setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, CONFIG.SYNC_EVERY_MINUTES * 60000);
-}
-
-/* ---------------- group chat ---------------- */
-
-/** Send a message. Queued like any change, so it also works offline. */
-/** extra: { file: {name, mimeType, data(base64)}, location: {lat, lng, accuracy} } */
-export async function sendChat(text, extra = {}) {
-  const t = String(text || '').trim();
-  if (!t && !extra.file && !extra.location) return null;
-  const messageId = 'm' + uuid().replace(/-/g, '').slice(0, 15);
-  const change = { op: 'chat', table: '_Chat', fields: { Text: t }, messageId };
-  if (extra.file) change.file = extra.file;
-  if (extra.location) change.location = extra.location;
-  const what = t ? (t.length > 40 ? t.slice(0, 40) + '…' : t) : extra.file ? extra.file.name : 'Location';
-  return enqueue(change, 'Message: ' + what);
-}
-
-/** {name, mimeType, data} → what the file cache keeps */
-export function chatFileEntry(f) {
-  const bytes = Uint8Array.from(atob(f.data), ch => ch.charCodeAt(0));
-  return { name: f.name, mimeType: f.mimeType, blob: new Blob([bytes], { type: f.mimeType }) };
-}
-function locText(l) { return l ? Number(l.lat).toFixed(6) + ',' + Number(l.lng).toFixed(6) + (l.accuracy != null ? ',' + Math.round(l.accuracy) : '') : ''; }
-
-/** Messages to show: the downloaded ones plus this phone's unsent ones. */
-export function chatView() {
-  const have = new Set(model.chat.map(m => m.Message_ID));
-  const mine = model.outbox.filter(c => c.op === 'chat' && !have.has(c.messageId)).map(c => {
-    const mentions = B.mentionsIn(c.fields && c.fields.Text);
-    return { Message_ID: c.messageId, Sent_At: localNow().replace(' ', 'T'), Author: (model.user && model.user.name) || 'Me', Author_Type: 'human',
-      Text: (c.fields && c.fields.Text) || '', Mentions: mentions, Task_Status: mentions.length ? 'waiting' : '', Reply_To: '',
-      Attachment: c.file ? 'local' : '', Attachment_Name: c.file ? c.file.name : '', Attachment_Type: c.file ? c.file.mimeType : '', Location: locText(c.location),
-      __file: c.file || null,
-      __pending: c.state !== 'refused', __refused: c.state === 'refused' ? (c.message || 'Not sent') : null };
-  });
-  return model.chat.concat(mine);
-}
-
-async function mergeChat(list) {
-  if (!list || !list.length) return;
-  const byId = new Map(model.chat.map(m => [m.Message_ID, m]));
-  list.forEach(m => byId.set(m.Message_ID, Object.assign({}, byId.get(m.Message_ID) || {}, m)));
-  model.chat = [...byId.values()].sort((a, b) => String(a.Sent_At).localeCompare(String(b.Sent_At))).slice(-500);
-  await store.set('chat', model.chat);
-  emit('chat');
-}
-
-function newestChatStamp() {
-  let s = '';
-  model.chat.forEach(m => { if (m.Sent_At > s) s = m.Sent_At; if (m.Updated_At && m.Updated_At > s) s = m.Updated_At; });
-  return s;
-}
-
-/** Quick check for new messages (only the chat, not all the data). */
-let chatBusy = false;
-export async function refreshChat() {
-  if (!CONFIG.CHAT_ENABLED || chatBusy || !model.token || navigator.onLine === false) return;
-  chatBusy = true;
-  try {
-    const data = await call('chat', { since: newestChatStamp() }, model.token);
-    if (Array.isArray(data.members)) model.members = data.members;
-    await mergeChat(data.chat || []);
-  } catch (e) { /* the regular sync shows connection problems */ }
-  finally { chatBusy = false; }
-}
-
-/** Messages from others newer than what this phone has seen in the Group screen. */
-export function unreadChat() {
-  const me = model.user ? model.user.name : '';
-  return model.chat.filter(m => m.Sent_At > (model.chatSeen || '') && m.Author !== me && m.Author_Type !== 'system').length;
-}
-export async function markChatSeen() {
-  const s = model.chat.length ? model.chat[model.chat.length - 1].Sent_At : '';
-  if (s && s !== model.chatSeen) { model.chatSeen = s; await store.set('chatSeen', s); emit('chat'); }
-  if (document.visibilityState === 'visible') clearChatNotifications();
 }
