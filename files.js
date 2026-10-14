@@ -13,7 +13,7 @@ export async function openFile(table, key, column, value) {
     if (navigator.onLine === false) { toast('This file has not been opened on this phone before, so it needs a connection.', { error: true }); return; }
     toast('Opening file…', { ms: 1500 });
     try {
-      const r = await call('getFile', { table, key, column }, model.token);
+      const r = await call('getFile', { table, key, column, path: value }, model.token);
       const bytes = Uint8Array.from(atob(r.data), ch => ch.charCodeAt(0));
       entry = { name: r.name, mimeType: r.mimeType, blob: new Blob([bytes], { type: r.mimeType }) };
       await store.filePut(cacheKey, entry);

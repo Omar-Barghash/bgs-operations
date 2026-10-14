@@ -102,6 +102,7 @@ function describe(ch) {
     case 'reject': return 'Reject project ' + ch.key;
     case 'complete': return 'Complete action ' + ch.key;
     case 'upload': return 'Upload ' + (ch.fileName || 'file') + ' to ' + singular(label) + ' ' + ch.key;
+    case 'removeFile': return 'Remove ' + String(ch.path || 'file').split('/').pop() + ' from ' + singular(label) + ' ' + ch.key;
     default: return ch.op;
   }
 }
@@ -186,7 +187,10 @@ function applyLocal(t, ch) {
   } else if (ch.op === 'complete') {
     const r = findIn(t, 'Action Tracker', ch.key); if (r) { r.Status = 'Completed'; mark(r); }
   } else if (ch.op === 'upload') {
-    const r = findIn(t, ch.table, ch.key); if (r) { r[ch.column] = 'pending-upload:' + (ch.fileName || 'file'); mark(r); }
+    // files are added, never replaced: the new one shows as waiting at the end of the list
+    const r = findIn(t, ch.table, ch.key); if (r) { r[ch.column] = B.fileJoin(B.fileList(r[ch.column]).concat(['pending-upload:' + (ch.fileName || 'file')])); mark(r); }
+  } else if (ch.op === 'removeFile') {
+    const r = findIn(t, ch.table, ch.key); if (r) { r[ch.column] = B.fileJoin(B.fileList(r[ch.column]).filter(p => p !== ch.path)); mark(r); }
   }
 }
 
@@ -258,7 +262,7 @@ async function pushAll() {
     }
     const payload = batch.map(c => {
       const o = { id: c.id, op: c.op, table: c.table };
-      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
+      ['key', 'fields', 'orig', 'to', 'from', 'reason', 'tempKey', 'column', 'fileName', 'mimeType', 'data', 'path'].forEach(k => { if (c[k] !== undefined) o[k] = c[k]; });
       return o;
     });
     const res = await call('push', { changes: payload }, model.token);

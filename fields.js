@@ -1,7 +1,7 @@
 /* Forms and field display, driven by the table definitions and the shared
  * rules in shared.js: a field appears, is editable, or is required exactly
  * when the rules say so, for this user and this stage. */
-import { h, iconEl, fmtDate, fmtMoney, fmtNumber, toast, formDialog } from './ui.js';
+import { h, iconEl, fmtDate, fmtMoney, fmtNumber, toast, formDialog, confirmDialog } from './ui.js';
 import { model, enqueue, newTempKey, isTemp } from './sync.js';
 import { CONFIG } from './config.js';
 import { openFile } from './files.js';
@@ -33,6 +33,10 @@ export function valueNode(table, col, rec) {
   const c = B.column(table, col);
   const v = rec[col];
   if (v === '' || v === null || v === undefined) return h('span', { class: 'muted' }, '—');
+  if (c && (c.type === 'file' || c.type === 'image')) {
+    const list = B.fileList(v);
+    return list.length === 1 ? (list[0].startsWith('pending-upload:') ? h('span', { class: 'muted' }, 'Waiting to upload: ' + list[0].slice(15)) : list[0].split('/').pop()) : list.length + ' files';
+  }
   if (typeof v === 'string' && v.startsWith('pending-upload:')) return h('span', { class: 'muted' }, 'Waiting to upload: ' + v.slice(15));
   switch (c && c.type) {
     case 'date': case 'datetime': return fmtDate(v);
@@ -70,18 +74,33 @@ export function fieldList(table, rec, cols) {
   return h('dl', { class: 'fields' }, rows);
 }
 
+/* A file field: every attached file with its own Open button, then "Add".
+ * (Farida, 14 Oct 2026: several quotations / POs / invoices / photos per project.) */
 function fileRow(table, col, rec, rule) {
-  const v = rec[col];
+  const list = B.fileList(rec[col]);
   const key = rec[B.SCHEMA[table].key];
+  const type = B.column(table, col).type;
   const dd = h('dd', null);
-  if (B.isBlank(v)) dd.append(h('span', { class: 'muted' }, 'No file'));
-  else if (String(v).startsWith('pending-upload:')) dd.append(h('span', { class: 'muted' }, 'Waiting to upload: ' + String(v).slice(15)));
-  else dd.append(h('button', { class: 'btn small', onclick: () => openFile(table, key, col, v) }, iconEl('file'), 'Open'), h('span', { class: 'muted', style: 'font-size:13px' }, String(v).split('/').pop()));
-  if (rule.editable && !isTemp(key)) {
-    dd.append(filePickerButtons(B.column(table, col).type, async (f) => {
+  const canEdit = rule.editable && !isTemp(key);
+  if (!list.length) dd.append(h('span', { class: 'muted' }, type === 'image' ? 'No photo' : 'No file'));
+  const ul = h('ul', { class: 'file-list' });
+  list.forEach(p => {
+    if (p.startsWith('pending-upload:')) { ul.append(h('li', null, h('span', { class: 'muted' }, 'Waiting to upload: ' + p.slice(15)))); return; }
+    ul.append(h('li', null,
+      h('button', { class: 'btn small', type: 'button', onclick: () => openFile(table, key, col, p) }, iconEl('file'), 'Open'),
+      h('span', { class: 'file-name' }, p.split('/').pop()),
+      canEdit ? h('button', { class: 'file-x', type: 'button', 'aria-label': 'Remove ' + p.split('/').pop(), title: 'Remove from this list', onclick: async () => {
+        const ok = await confirmDialog({ title: 'Remove this file?', message: p.split('/').pop() + ' will be taken off this list. The file itself stays in Google Drive.', confirmText: 'Remove', danger: true });
+        if (!ok) return;
+        await enqueue({ op: 'removeFile', table, key, column: col, path: p }, 'Remove ' + p.split('/').pop());
+      } }, '×') : null));
+  });
+  if (list.length) dd.append(ul);
+  if (canEdit && list.length < B.MAX_FILES) {
+    dd.append(filePickerButtons(type, async (f) => {
       await enqueue({ op: 'upload', table, key, column: col, fileName: f.name, mimeType: f.mimeType, data: f.data }, 'Upload ' + f.name);
-      toast('Saved on this phone. It uploads when online.');
-    }, B.isBlank(v) ? 'Upload' : 'Replace'));
+      toast('Added. It uploads when online.');
+    }, list.length ? 'Add another' : 'Upload'));
   }
   return h('div', { class: 'field-row file' }, h('dt', null, B.labelOf(table, col)), dd);
 }
@@ -221,8 +240,12 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
       case 'email':
         input = h('input', { id, class: 'input', type: 'email', autocomplete: 'off', value: v ?? '', oninput: e => set(e.target.value.trim()) }); break;
       case 'file': case 'image': {
-        const name = h('span', { class: 'name' }, files[col] ? files[col].name : (B.isBlank(v) ? 'No file' : String(v).split('/').pop()));
-        wrap.append(h('div', { class: 'filepick' }, name, filePickerButtons(c.type, f => { files[col] = f; name.textContent = f.name + ' (will upload)'; }, B.isBlank(v) ? 'Choose' : 'Replace')));
+        // files are added to the ones already attached (never replaced)
+        const have = B.fileList(v).filter(p => !p.startsWith('pending-upload:')).map(p => p.split('/').pop());
+        const name = h('span', { class: 'name' });
+        const show = () => { const add = (files[col] || []).map(f => f.name + ' (will upload)'); name.textContent = have.concat(add).join(', ') || 'No file'; };
+        show();
+        wrap.append(h('div', { class: 'filepick' }, name, filePickerButtons(c.type, f => { (files[col] = files[col] || []).push(f); show(); }, have.length || files[col] ? 'Add another' : 'Choose')));
         return wrap;
       }
       default:
@@ -306,7 +329,7 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
       const rule = ruleFor(table, col, values, isNew);
       if (!rule.visible || !rule.editable) return;
       const v = values[col];
-      if (rule.required && B.isBlank(v) && !files[col]) { errors[col] = B.labelOf(table, col) + ' is required.'; ok = false; }
+      if (rule.required && B.isBlank(v) && !(files[col] && files[col].length)) { errors[col] = B.labelOf(table, col) + ' is required.'; ok = false; }
       if (['number', 'price', 'decimal'].includes(c.type) && !B.isBlank(v) && isNaN(Number(v))) { errors[col] = 'Enter a number.'; ok = false; }
       if (c.type === 'email' && !B.isBlank(v) && !/^\S+@\S+\.\S+$/.test(String(v))) { errors[col] = 'Enter a valid email address.'; ok = false; }
     });
@@ -338,8 +361,7 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
       if (Object.keys(fields).length) await enqueue({ op: 'update', table, key, fields, orig }, 'Edit ' + humanTable(table) + ' ' + (record[def.label] || key));
     }
     for (const col of Object.keys(files)) {
-      const f = files[col];
-      await enqueue({ op: 'upload', table, key, column: col, fileName: f.name, mimeType: f.mimeType, data: f.data }, 'Upload ' + f.name);
+      for (const f of files[col]) await enqueue({ op: 'upload', table, key, column: col, fileName: f.name, mimeType: f.mimeType, data: f.data }, 'Upload ' + f.name);
     }
     toast(navigator.onLine ? 'Saved.' : 'Saved on this phone. It will sync when online.');
     onDone && onDone(key);
