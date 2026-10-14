@@ -212,6 +212,12 @@ main#view {
 .needs li { margin: 2px 0; }
 
 .section { margin-top: 20px; }
+/* project totals (Omar, 14 Oct 2026) */
+.totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; padding: 16px 16px 0; }
+.totals .total { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 12px; min-width: 0; }
+.totals .total-label { font-size: 13px; color: var(--ink-2); }
+.totals .total-value { font-family: var(--serif); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.totals .total-note { font-size: 12px; color: var(--ink-3); }
 .section-head {
   display: flex; align-items: baseline; gap: 10px; padding: 0 16px 8px;
   font-family: var(--serif); font-size: 19px; font-weight: 600;

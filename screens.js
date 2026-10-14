@@ -4,7 +4,7 @@
  * (forms are not live, so typing is never interrupted). */
 import { h, iconEl, icon, toast, confirmDialog, promptDialog, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
 import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp } from './sync.js';
-import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode } from './fields.js';
+import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, projectTotal } from './fields.js';
 import { CONFIG } from './config.js';
 
 const B = window.BGS;
@@ -254,6 +254,18 @@ export function projectScreen(key) {
     node.append(bar);
     if (needs) node.append(needs);
 
+    // Project totals (Omar, 14 Oct 2026): sum of the items, or a number typed by hand under Edit
+    const totals = ['Total_Cost', 'Total_Price'].filter(c => ruleFor('Projects', c, p).visible);
+    if (totals.length) {
+      node.append(h('div', { class: 'totals', role: 'group', 'aria-label': 'Project totals' }, totals.map(c => {
+        const t = projectTotal(p, c);
+        return h('div', { class: 'total' },
+          h('div', { class: 'total-label' }, B.labelOf('Projects', c)),
+          h('div', { class: 'total-value' }, fmtMoney(t.value)),
+          h('div', { class: 'total-note' }, t.manual ? 'Set by hand' : 'Sum of ' + data.items.length + ' item' + (data.items.length === 1 ? '' : 's')));
+      })));
+    }
+
     node.append(h('div', { class: 'section' }, fieldList('Projects', p, PROJECT_DETAIL)));
 
     // Items (SOURCE: Related Items, "➕ Add Items")
@@ -273,7 +285,7 @@ export function projectScreen(key) {
     const acts = model.view['Action Tracker'].filter(a => sameKey(a['Project #'], pnum));
     node.append(h('div', { class: 'section' },
       sectionHead('Actions', acts.length, h('a', { class: 'btn small', href: '#/new/Action%20Tracker?' + new URLSearchParams({ 'Project #': pnum }) }, iconEl('plus'), 'Add actions')),
-      acts.length ? h('div', { class: 'list' }, acts.map(a => actionRow(a))) : null));
+      acts.length ? h('div', { class: 'list' }, acts.map(a => actionRow(a, true, true))) : null));
 
     // Stage history (hidden column in AppSheet; shown here folded, read-only)
     const hist = model.view.Stage_History.filter(x => sameKey(x.Project_ID, pnum)).sort((a, b) => String(b.Changed_At).localeCompare(String(a.Changed_At)));
@@ -341,7 +353,7 @@ export function itemScreen(key) {
 
 const ACTION_SEARCH = ['Action', 'BD Project Name', 'Owner', 'Location', 'Status', 'Criticality'];
 
-function actionRow(a, showOwner) {
+function actionRow(a, showOwner, inProject) {
   const open = B.isOpenAction(a);
   const dueLate = /late/i.test(a.Status);
   return h('div', { class: 'row', onclick: () => { location.hash = '#/a/' + encodeURIComponent(a['Action #']); } },
@@ -350,7 +362,7 @@ function actionRow(a, showOwner) {
       h('span', { class: 'icon-btn', style: 'color:var(--green)', html: icon.check, 'aria-label': 'Completed' }),
     h('div', { class: 'main' },
       h('div', { class: 'title' }, a.Action || 'Action'),
-      h('div', { class: 'sub' }, [a['BD Project Name'], showOwner ? a.Owner : null, a.Location].filter(x => !B.isBlank(x)).join(', '))),
+      h('div', { class: 'sub' }, [inProject ? null : a['BD Project Name'], showOwner ? a.Owner : null, a.Location].filter(x => !B.isBlank(x)).join(', '))),
     h('div', { class: 'meta' }, h('div', { style: dueLate ? 'color:var(--red);font-weight:600' : '' }, fmtDate(a['Due Date'])), statusBadge(a.Status)));
 }
 

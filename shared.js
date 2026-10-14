@@ -54,7 +54,10 @@ var BGS = (function () {
         { name: 'Rejection Reason', type: 'text' },
         { name: 'Quotation', type: 'file' },
         { name: 'PO', type: 'file' },
-        { name: 'Invoice', type: 'file' }
+        { name: 'Invoice', type: 'file' },
+        // Omar, 14 Oct 2026: a SUMIF of the project's items, or a number typed by hand
+        { name: 'Total_Cost', type: 'price', label: 'Total Cost', optional: true },
+        { name: 'Total_Price', type: 'price', label: 'Total Price', optional: true }
       ]
     },
     'Items': {
@@ -279,6 +282,13 @@ var BGS = (function () {
     var def = column(table, col);
     if (def && def.auto) r.editable = false;
     var st = row.Stage;
+    // Omar, 14 Oct 2026: a stage's details stay on view in the later stages
+    // (quotation in Executing, PO in Waiting for Payment, ...). They can be
+    // changed only in their own stage. In Rejected they show when filled in.
+    function fromStage(stage) {
+      var i = stageIndex(st), n = stageIndex(stage);
+      return (i >= n && i <= stageIndex(S6)) || (same(st, S7) && !isBlank(row[col]));
+    }
 
     if (table === 'Projects') {
       switch (col) {
@@ -289,16 +299,18 @@ var BGS = (function () {
         case 'Company':
           r.editable = same(st, S1); break;
         case 'Contract#':
-          r.visible = PERM.seeContract(user) && same(st, S4); break;
+          r.visible = PERM.seeContract(user) && fromStage(S4); r.editable = same(st, S4); break;
         case 'Quotation_No': case 'Quotation':
-          r.visible = same(st, S2); break;
+          r.visible = fromStage(S2); r.editable = same(st, S2); break;
         case 'PO_No': case 'PO':
-          r.visible = same(st, S3); break;
+          r.visible = fromStage(S3); r.editable = same(st, S3); break;
         case 'Invoice#': case 'Invoice': case 'Expected Cash In': case 'Satisfaction_Completed':
-          r.visible = PERM.seeFinance(user) && same(st, S5); break;
+          r.visible = PERM.seeFinance(user) && fromStage(S5); r.editable = same(st, S5); break;
         case 'Documentation_Verified':
-          r.visible = PERM.seeFinance(user) && same(st, S5);
-          r.editable = PERM.verifyDocs(user); break;
+          r.visible = PERM.seeFinance(user) && fromStage(S5);
+          r.editable = PERM.verifyDocs(user) && same(st, S5); break;
+        case 'Total_Price':
+          r.visible = fromStage(S2); break; // like the items' Selling Price
         case 'Rejection Reason':
           r.visible = same(st, S7) || !isBlank(row['Rejection Reason']);
           r.required = same(st, S7); break;

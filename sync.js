@@ -161,6 +161,7 @@ function applyLocal(t, ch) {
     Object.assign(r, ch.fields);
     if (ch.table === 'Items') r.Selling_Price = B.sellingPriceRule(r);
     if (ch.table === 'Action Tracker') r.Status = B.statusAfterEdit(r, today);
+    if (ch.table === 'Projects') ['Total_Cost', 'Total_Price'].forEach(c => { if (c in ch.fields) r[c + '_Manual'] = !B.isBlank(ch.fields[c]); });
     mark(r);
   } else if (ch.op === 'delete') {
     const kc = keyCol(ch.table);

@@ -11,9 +11,21 @@ const B = window.BGS;
 /* Column order of each form (SOURCE: AppSheet form views' ColumnOrder;
  * "null" in AppSheet means all columns in table order). */
 const FORM_ORDER = {
-  'Projects': ['Stage', 'BD Project Name', 'Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'PO_No', 'Invoice#', 'Expected Cash In', 'Documentation_Verified', 'Satisfaction_Completed', 'Rejection Reason', 'Quotation', 'PO', 'Invoice'],
+  'Projects': ['Stage', 'BD Project Name', 'Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'PO_No', 'Invoice#', 'Expected Cash In', 'Documentation_Verified', 'Satisfaction_Completed', 'Rejection Reason', 'Total_Cost', 'Total_Price', 'Quotation', 'PO', 'Invoice'],
   'Action Tracker': ['Project #', 'BD Project Name', 'Criticality', 'Action', 'Owner', 'Due Date', 'Estimated Time', 'Location', 'Status', 'Created at']
 };
+/* Project totals (Omar, 14 Oct 2026): the sum of the project's items, unless typed by hand. */
+export const TOTAL_COLS = ['Total_Cost', 'Total_Price'];
+const TOTAL_FROM = { Total_Cost: 'Estimated_Cost', Total_Price: 'Selling_Price' };
+export function itemsTotal(pnum, col) {
+  const want = String(pnum ?? '').trim().toLowerCase();
+  return model.view.Items.filter(it => String(it.Project_ID ?? '').trim().toLowerCase() === want)
+    .reduce((s, it) => s + (Number(it[TOTAL_FROM[col]]) || 0), 0);
+}
+/* What the project screen shows: the typed number, or the items total. */
+export function projectTotal(p, col) {
+  return p[col + '_Manual'] && !B.isBlank(p[col]) ? { value: Number(p[col]), manual: true } : { value: itemsTotal(p['P#'], col), manual: false };
+}
 export function formColumns(table) { return FORM_ORDER[table] || B.SCHEMA[table].columns.map(c => c.name); }
 
 export function parentOf(table, rec) {
@@ -164,6 +176,8 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
   const def = B.SCHEMA[table];
   const start = Object.assign({}, record || {});
   if (isNew) Object.assign(start, previewDefaults(table, start, context));
+  // project totals: empty in the form while they follow the items (Omar, 14 Oct 2026)
+  if (table === 'Projects' && !isNew) TOTAL_COLS.forEach(col => { if (!record[col + '_Manual']) start[col] = ''; });
   const values = Object.assign({}, start);
   const files = {};
   const inputs = {};
@@ -178,6 +192,7 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
       const rule = ruleFor(table, col, values, isNew);
       if (!rule.visible) return;
       if (isNew && c.auto && B.isBlank(values[col]) && !['Stage', 'Owner', 'Status'].includes(col)) return;
+      if (isNew && table === 'Projects' && TOTAL_COLS.includes(col)) return;
       box.append(fieldEditor(c, rule));
     });
   }
@@ -197,6 +212,14 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
       const shown = c.type === 'ref' ? refLabel(c.ref, v) : c.type === 'date' || c.type === 'datetime' ? fmtDate(v) : c.type === 'price' ? fmtMoney(v) : c.type === 'bool' ? (v === true ? 'Yes' : v === false ? 'No' : String(v ?? '')) : String(v ?? '');
       input = h('input', { id, class: 'input', readonly: true, value: shown || '—' });
       wrap.append(input);
+      return wrap;
+    }
+
+    if (table === 'Projects' && TOTAL_COLS.includes(col)) {
+      const auto = itemsTotal(record && record['P#'], col);
+      input = h('input', { id, class: 'input', inputmode: 'decimal', value: v ?? '', placeholder: 'Items total: ' + fmtMoney(auto), oninput: e => set(e.target.value.trim()) });
+      wrap.append(input);
+      hint(B.isBlank(v) ? 'Follows the items (' + fmtMoney(auto) + '). Type a number to set it by hand.' : 'Set by hand. Clear it to go back to the items total (' + fmtMoney(auto) + ').');
       return wrap;
     }
 
