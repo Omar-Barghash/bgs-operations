@@ -82,7 +82,19 @@ var BGS = (function () {
         { name: 'Name', type: 'text' },
         { name: 'Role', type: 'text' },
         { name: 'Active', type: 'bool' },
-        { name: 'Departement', type: 'text', label: 'Department' }
+        { name: 'Departement', type: 'text', label: 'Department' },
+        // DECISION (Omar, 14 Oct 2026): access is given per app function, ticked here
+        { name: 'All Projects', type: 'bool', optional: true },
+        { name: 'Satisfaction Menu', type: 'bool', optional: true },
+        { name: 'See Contract', type: 'bool', optional: true },
+        { name: 'See Finance', type: 'bool', optional: true },
+        { name: 'Verify Docs', type: 'bool', optional: true },
+        { name: 'Manage Users', type: 'bool', optional: true },
+        { name: 'Move to Pricing', type: 'bool', optional: true },
+        { name: 'Move to Approval', type: 'bool', optional: true },
+        { name: 'Move to Executing', type: 'bool', optional: true },
+        { name: 'Move to Payment', type: 'bool', optional: true },
+        { name: 'Move to Done', type: 'bool', optional: true }
       ]
     },
     'Stage_History': {
@@ -187,25 +199,57 @@ var BGS = (function () {
   function deptIn(user, list) { return !!user && inList(user.dept, list); }
   function roleIn(user, list) { return !!user && inList(user.role, list); }
 
-  var PERM = {
-    // DECISION (F1): AppSheet checked Role = "Management", which no user has.
-    // Corrected to Department = Management.
-    seeDoneProjects: function (u) { return deptIn(u, [DEPT.MGMT]); },
-    // SOURCE: "Projects" view Show_If
-    seeAllProjectsMenu: function (u) { return deptIn(u, [DEPT.MGMT]); },
-    // SOURCE: "Customer Satisfaction" view Show_If (Role = "Customer Satisfaction").
-    // DECISION (F2): also shown to "Customer Satisfaction Specialist".
-    seeSatisfactionMenu: function (u) { return roleIn(u, [ROLE.CS, ROLE.CSS]); },
+  /* ---------- access by app function (Farida & Omar, 14 Oct 2026) ----------
+   * DECISION: each person's access is ticked per function in the Users sheet
+   * (one tick column per function below), instead of being worked out from
+   * their Role / Department. A blank cell means no.
+   * "legacy" is the old Role / Department rule. It is used only while a
+   * column does not exist yet in the Users sheet (and it was used once to
+   * pre-tick the columns, so nobody's access changed on the day of the switch). */
+  var ACCESS = [
+    // SOURCE: "Projects" view Show_If; DECISION (F1): Done projects for Department = Management
+    { key: 'allProjects', column: 'All Projects', label: 'All Projects menu (incl. Done projects)', legacy: function (u) { return deptIn(u, [DEPT.MGMT]); } },
+    // SOURCE: "Customer Satisfaction" view Show_If; DECISION (F2): also the Specialist
+    { key: 'satisfactionMenu', column: 'Satisfaction Menu', label: 'Customer Satisfaction menu', legacy: function (u) { return roleIn(u, [ROLE.CS, ROLE.CSS]); } },
     // SOURCE: Contract# Show_If
-    seeContract: function (u) { return deptIn(u, [DEPT.IT, DEPT.MGMT]); },
-    // SOURCE: Invoice#, Invoice, Expected Cash In, Documentation_Verified,
-    // Satisfaction_Completed, Related Customer_Satisfactions Show_If
-    seeFinance: function (u) { return deptIn(u, [DEPT.BD, DEPT.MGMT]); },
+    { key: 'seeContract', column: 'See Contract', label: 'See Contract #', legacy: function (u) { return deptIn(u, [DEPT.IT, DEPT.MGMT]); } },
+    // SOURCE: Invoice#, Invoice, Expected Cash In, Documentation_Verified, Satisfaction_Completed Show_If
+    { key: 'seeFinance', column: 'See Finance', label: 'See invoices and cash-in', legacy: function (u) { return deptIn(u, [DEPT.BD, DEPT.MGMT]); } },
     // SOURCE: Documentation_Verified Editable_If
-    verifyDocs: function (u) { return roleIn(u, [ROLE.ADMIN, ROLE.CSS]); },
-    // NEW (security): the Users sheet now controls who can sign in, so only
-    // Management may change it. AppSheet allowed everyone.
-    manageUsers: function (u) { return deptIn(u, [DEPT.MGMT]); }
+    { key: 'verifyDocs', column: 'Verify Docs', label: 'Verify documentation', legacy: function (u) { return roleIn(u, [ROLE.ADMIN, ROLE.CSS]); } },
+    // NEW (security): only these people may change the Users sheet from the app
+    { key: 'manageUsers', column: 'Manage Users', label: 'Manage users', legacy: function (u) { return deptIn(u, [DEPT.MGMT]); } },
+    // SOURCE: stage actions (Operations / Management; Done: Business Development / Management)
+    { key: 'moveToPricing', column: 'Move to Pricing', label: 'Move projects to Pricing', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
+    { key: 'moveToApproval', column: 'Move to Approval', label: 'Move projects to Waiting for Approval', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
+    { key: 'moveToExecuting', column: 'Move to Executing', label: 'Move projects to Executing', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
+    { key: 'moveToPayment', column: 'Move to Payment', label: 'Move projects to Waiting for Payment', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
+    { key: 'moveToDone', column: 'Move to Done', label: 'Move projects to Done', legacy: function (u) { return deptIn(u, [DEPT.BD, DEPT.MGMT]); } }
+  ];
+  function accessDef(key) { for (var i = 0; i < ACCESS.length; i++) { if (ACCESS[i].key === key) return ACCESS[i]; } return null; }
+  /* user.access = { key: true/false } for every tick column present in the Users sheet */
+  function can(user, key) {
+    if (!user) return false;
+    var a = accessDef(key);
+    if (!a) return false;
+    if (user.access && Object.prototype.hasOwnProperty.call(user.access, key)) return !!user.access[key];
+    return a.legacy(user);
+  }
+  /* The ticks of one Users row (only columns that exist in the sheet). */
+  function accessFromRow(row) {
+    var out = {};
+    ACCESS.forEach(function (a) { if (row && Object.prototype.hasOwnProperty.call(row, a.column)) out[a.key] = isTrue(row[a.column]); });
+    return out;
+  }
+
+  var PERM = {
+    seeDoneProjects: function (u) { return can(u, 'allProjects'); },
+    seeAllProjectsMenu: function (u) { return can(u, 'allProjects'); },
+    seeSatisfactionMenu: function (u) { return can(u, 'satisfactionMenu'); },
+    seeContract: function (u) { return can(u, 'seeContract'); },
+    seeFinance: function (u) { return can(u, 'seeFinance'); },
+    verifyDocs: function (u) { return can(u, 'verifyDocs'); },
+    manageUsers: function (u) { return can(u, 'manageUsers'); }
   };
 
   /* Columns the API never sends to a user who may not see them. */
@@ -330,7 +374,7 @@ var BGS = (function () {
   }
 
   var MOVES = [
-    { name: 'Move to Pricing', from: S1, to: S2, depts: [DEPT.OPS, DEPT.MGMT],
+    { name: 'Move to Pricing', from: S1, to: S2, access: 'moveToPricing',
       check: function (p, d) {
         var out = [];
         if (isBlank(p.Company)) out.push('Company is empty');
@@ -338,7 +382,7 @@ var BGS = (function () {
         if (d.items.length === 0) out.push('No items yet: add at least one item');
         return out;
       } },
-    { name: 'Move to Waiting for Approval', from: S2, to: S3, depts: [DEPT.OPS, DEPT.MGMT],
+    { name: 'Move to Waiting for Approval', from: S2, to: S3, access: 'moveToApproval',
       check: function (p, d) {
         var out = [];
         if (isBlank(p.Quotation_No)) out.push('Quotation Number is empty');
@@ -350,10 +394,10 @@ var BGS = (function () {
           return n;
         }));
       } },
-    { name: 'Move to Executing', from: S3, to: S4, depts: [DEPT.OPS, DEPT.MGMT],
+    { name: 'Move to Executing', from: S3, to: S4, access: 'moveToExecuting',
       sets: { 'Execution_Started_At': 'today' },
       check: function (p) { return isBlank(p.PO_No) ? ['PO Number is empty'] : []; } },
-    { name: 'Move to Waiting for Payment', from: S4, to: S5, depts: [DEPT.OPS, DEPT.MGMT],
+    { name: 'Move to Waiting for Payment', from: S4, to: S5, access: 'moveToPayment',
       check: function (p, d) {
         return itemNeeds(d.items, function (it) {
           var n = [];
@@ -362,7 +406,7 @@ var BGS = (function () {
           return n;
         });
       } },
-    { name: 'Move to Done', from: S5, to: S6, depts: [DEPT.BD, DEPT.MGMT],
+    { name: 'Move to Done', from: S5, to: S6, access: 'moveToDone',
       check: function (p, d) {
         var out = [];
         if (isBlank(p['Invoice#'])) out.push('Invoice Number is empty');
@@ -372,15 +416,15 @@ var BGS = (function () {
       } }
   ];
 
-  /* Department names for "who may do this" notes. */
-  function deptNames(list) { return list.join(' or '); }
+  /* Note shown when this user may not do a move. */
+  function moveAccessNote(move) { var a = accessDef(move.access); return 'You need the "' + (a ? a.column : move.name) + '" tick in the Users sheet for this step. Ask Omar.'; }
 
   /* The next move for a project, with whether this user may do it now. */
   function nextMove(project, user, data) {
     for (var i = 0; i < MOVES.length; i++) {
       var m = MOVES[i];
       if (same(project.Stage, m.from)) {
-        var allowedUser = deptIn(user, m.depts);
+        var allowedUser = can(user, m.access);
         var reasons = m.check(project, data || { items: [], satisfactions: [] });
         return { move: m, userAllowed: allowedUser, reasons: reasons, ok: allowedUser && reasons.length === 0 };
       }
@@ -426,6 +470,16 @@ var BGS = (function () {
     return sp;
   }
 
+  /* ---------- several files in one cell (Farida, 14 Oct 2026) ----------
+   * DECISION (Omar): a file column keeps every file, one path per line in the
+   * same cell. Adding a file appends a line; nothing is replaced. */
+  var MAX_FILES = 30;
+  function fileList(v) {
+    if (isBlank(v)) return [];
+    return String(v).split(/\r?\n/).map(function (x) { return x.trim(); }).filter(function (x) { return x !== ''; });
+  }
+  function fileJoin(list) { return list.join('\n'); }
+
   /* SOURCE: BD Project Name initial value */
   function bdProjectName(pnum, companyCode, projectName) {
     return pnum + '. ' + norm(companyCode) + ' - ' + norm(projectName);
@@ -437,8 +491,9 @@ var BGS = (function () {
     norm: norm, same: same, isBlank: isBlank, isTrue: isTrue, inList: inList,
     column: column, labelOf: labelOf, stageIndex: stageIndex,
     hiddenColumnsFor: hiddenColumnsFor, canSeeProject: canSeeProject,
+    fileList: fileList, fileJoin: fileJoin, MAX_FILES: MAX_FILES,
     fieldRule: fieldRule, canAdd: canAdd, canDelete: canDelete,
-    customersForCompany: customersForCompany, nextMove: nextMove, deptNames: deptNames, previousStage: previousStage, moveTo: moveTo, canReject: canReject,
+    customersForCompany: customersForCompany, nextMove: nextMove, moveAccessNote: moveAccessNote, ACCESS: ACCESS, can: can, accessFromRow: accessFromRow, previousStage: previousStage, moveTo: moveTo, canReject: canReject,
     isOpenAction: isOpenAction, statusForNewAction: statusForNewAction, statusAfterEdit: statusAfterEdit,
     sellingPriceRule: sellingPriceRule, bdProjectName: bdProjectName
   };

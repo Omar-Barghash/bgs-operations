@@ -109,7 +109,20 @@ function render() {
   drawTabs(); drawPill(); drawBanners();
 }
 
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
+/* Lists remember where you were (Farida, 14 Oct 2026): open a project, come back,
+ * and the list is at the same place, same section. Other screens start at the top. */
+const scrollMemory = new Map();
+let scrollKey = location.hash;
+const isListRoute = hash => /^#?\/?(active|projects|actions|cs|t\/[^/]+|actions\/at\/.+)?(\?.*)?$/.test(hash.replace(/^#\/?/, '#/')) || hash === '' || hash === '#/';
+window.addEventListener('scroll', () => { if (isListRoute(scrollKey)) scrollMemory.set(scrollKey, window.scrollY); }, { passive: true });
+window.addEventListener('hashchange', () => {
+  scrollKey = location.hash;
+  render();
+  const y = isListRoute(scrollKey) ? (scrollMemory.get(scrollKey) || 0) : 0;
+  window.scrollTo(0, y);
+  // the list may still be growing (fonts, images): try once more after it settles
+  if (y) requestAnimationFrame(() => { if (scrollKey === location.hash && Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y); });
+});
 
 onChange((kind, detail) => {
   if (kind === 'auth') { needsLogin = true; render(); return; }

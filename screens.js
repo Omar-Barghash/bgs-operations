@@ -226,7 +226,7 @@ export function projectScreen(key) {
       } }, h('span', null, nm.move.name), iconEl('arrow')));
       if (!nm.ok) {
         const lines = [];
-        if (!nm.userAllowed) lines.push('Only ' + B.deptNames(nm.move.depts) + ' can do this step.');
+        if (!nm.userAllowed) lines.push(B.moveAccessNote(nm.move));
         nm.reasons.forEach(r => lines.push(r));
         needs = h('div', { class: 'needs', id: 'move-needs', role: 'note' },
           h('div', { class: 'needs-title' }, 'Still needed before "' + nm.move.name + '"'),
