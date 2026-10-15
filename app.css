@@ -218,6 +218,7 @@ main#view {
 .totals .total-label { font-size: 13px; color: var(--ink-2); }
 .totals .total-value { font-family: var(--serif); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .totals .total-note { font-size: 12px; color: var(--ink-3); }
+.row .meta .unit-price { font-size: 12px; color: var(--ink-3); }
 .section-head {
   display: flex; align-items: baseline; gap: 10px; padding: 0 16px 8px;
   font-family: var(--serif); font-size: 19px; font-weight: 600;

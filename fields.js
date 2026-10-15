@@ -14,13 +14,16 @@ const FORM_ORDER = {
   'Projects': ['Stage', 'BD Project Name', 'Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'PO_No', 'Invoice#', 'Expected Cash In', 'Documentation_Verified', 'Satisfaction_Completed', 'Rejection Reason', 'Total_Cost', 'Total_Price', 'Quotation', 'PO', 'Invoice'],
   'Action Tracker': ['Project #', 'BD Project Name', 'Criticality', 'Action', 'Owner', 'Due Date', 'Estimated Time', 'Location', 'Status', 'Created at']
 };
-/* Project totals (Omar, 14 Oct 2026): the sum of the project's items, unless typed by hand. */
+/* Project totals (Omar, 14-15 Oct 2026): quantity x unit price, added up over the
+ * project's items, unless typed by hand. */
 export const TOTAL_COLS = ['Total_Cost', 'Total_Price'];
 const TOTAL_FROM = { Total_Cost: 'Estimated_Cost', Total_Price: 'Selling_Price' };
+/* One item's quantity x unit price (blank or text counts as 0, like the sheet formula). */
+export function lineTotal(it, col) { return (Number(it.Qty) || 0) * (Number(it[col]) || 0); }
 export function itemsTotal(pnum, col) {
   const want = String(pnum ?? '').trim().toLowerCase();
   return model.view.Items.filter(it => String(it.Project_ID ?? '').trim().toLowerCase() === want)
-    .reduce((s, it) => s + (Number(it[TOTAL_FROM[col]]) || 0), 0);
+    .reduce((s, it) => s + lineTotal(it, TOTAL_FROM[col]), 0);
 }
 /* What the project screen shows: the typed number, or the items total. */
 export function projectTotal(p, col) {
@@ -228,7 +231,7 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
         input = h('textarea', { id, oninput: e => set(e.target.value) }); input.value = v ?? ''; break;
       case 'number': case 'price': case 'decimal':
         input = h('input', { id, class: 'input', inputmode: 'decimal', value: v ?? '', oninput: e => set(e.target.value.trim()) });
-        if (c.type === 'price') hint('Egyptian pounds (EGP)');
+        if (c.type === 'price') hint(table === 'Items' ? 'Price of ONE unit, in Egyptian pounds (EGP). The project total multiplies it by the Qty.' : 'Egyptian pounds (EGP)');
         break;
       case 'date': case 'datetime': {
         const legacy = !B.isBlank(v) && !ISO.test(String(v).slice(0, 10));

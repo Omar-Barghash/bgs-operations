@@ -71,8 +71,8 @@ var BGS = (function () {
         { name: 'Specification', type: 'text' },
         { name: 'Qty', type: 'number' },
         { name: 'Lead_Time_Days', type: 'number', label: 'Lead Time in Days' },
-        { name: 'Estimated_Cost', type: 'price', label: 'Estimated Cost' },
-        { name: 'Selling_Price', type: 'price', label: 'Selling Price' },
+        { name: 'Estimated_Cost', type: 'price', label: 'Estimated Cost (per unit)' }, // Omar, 15 Oct 2026: per unit, not the line total
+        { name: 'Selling_Price', type: 'price', label: 'Selling Price (per unit)' },
         { name: 'Delivered', type: 'bool' },
         { name: 'Delivery_Date', type: 'date', label: 'Promised Date' },
         { name: 'Execution_Photos', type: 'image', label: 'Execution Photo' }

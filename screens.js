@@ -4,7 +4,7 @@
  * (forms are not live, so typing is never interrupted). */
 import { h, iconEl, icon, toast, confirmDialog, promptDialog, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
 import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp } from './sync.js';
-import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, projectTotal } from './fields.js';
+import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, projectTotal, lineTotal } from './fields.js';
 import { CONFIG } from './config.js';
 
 const B = window.BGS;
@@ -262,7 +262,7 @@ export function projectScreen(key) {
         return h('div', { class: 'total' },
           h('div', { class: 'total-label' }, B.labelOf('Projects', c)),
           h('div', { class: 'total-value' }, fmtMoney(t.value)),
-          h('div', { class: 'total-note' }, t.manual ? 'Set by hand' : 'Sum of ' + data.items.length + ' item' + (data.items.length === 1 ? '' : 's')));
+          h('div', { class: 'total-note' }, t.manual ? 'Set by hand' : 'Qty × unit price, ' + data.items.length + ' item' + (data.items.length === 1 ? '' : 's')));
       })));
     }
 
@@ -318,7 +318,9 @@ function itemRow(it, project) {
       h('div', { class: 'title' }, it.Item_Name || 'Item'),
       h('div', { class: 'sub' }, (isTemp(it.Item_ID) ? 'New' : it.Item_ID) + (sub ? ', ' + sub : ''))),
     h('div', { class: 'meta' },
-      ruleFor('Items', 'Selling_Price', it).visible && !B.isBlank(it.Selling_Price) ? h('div', null, fmtMoney(it.Selling_Price)) : null,
+      ruleFor('Items', 'Selling_Price', it).visible && !B.isBlank(it.Selling_Price) ? [
+        h('div', null, fmtMoney(lineTotal(it, 'Selling_Price'))),
+        h('div', { class: 'unit-price' }, fmtMoney(it.Selling_Price) + ' each')] : null,
       fromExec ? (B.isTrue(it.Delivered) ? h('span', { class: 'badge done' }, 'Delivered') : h('span', { class: 'badge' }, 'Not delivered')) : null,
       it.__pending ? h('span', { class: 'badge pending' }, 'Pending') : null));
 }
