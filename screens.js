@@ -109,6 +109,16 @@ export function projectsScreen(mode) {
   };
 }
 
+/* Right side of a project row: Total Price (Omar, 20 Oct 2026; from Pricing on,
+ * like the project screen) and the criticality stars. */
+function projectMeta(p) {
+  const showPrice = ruleFor('Projects', 'Total_Price', p).visible;
+  const t = showPrice ? projectTotal(p, 'Total_Price') : null;
+  const price = t && t.value ? h('div', { class: 'row-price', title: 'Total Price' + (t.manual ? ' (set by hand)' : '') }, fmtMoney(t.value)) : null;
+  const crit = !B.isBlank(p.Criticality) ? h('div', { title: 'Criticality' }, p.Criticality) : null;
+  return price || crit ? h('div', { class: 'meta' }, price, crit) : null;
+}
+
 function projectRow(p, st, redraw) {
   const key = p['P#'];
   const sub = [p.Company, p.Customer].filter(x => !B.isBlank(x)).join(', ');
@@ -119,7 +129,7 @@ function projectRow(p, st, redraw) {
       h('div', { class: 'title' }, p['BD Project Name'] || p['Project Name'] || 'Project ' + key, p.__pending ? h('span', { class: 'sr-only' }, ' (not yet synced)') : null),
       sub ? h('div', { class: 'sub' }, sub) : null,
       rail(p.Stage, true)),
-    !B.isBlank(p.Criticality) ? h('div', { class: 'meta', title: 'Criticality' }, p.Criticality) : null,
+    projectMeta(p),
     p.__pending ? h('span', { class: 'badge pending', title: 'Waiting to sync' }, 'Pending') : null
   ];
   if (st.sel) return h('label', { class: 'row' }, inner);
@@ -364,7 +374,9 @@ function actionRow(a, showOwner, inProject) {
       h('span', { class: 'icon-btn', style: 'color:var(--green)', html: icon.check, 'aria-label': 'Completed' }),
     h('div', { class: 'main' },
       h('div', { class: 'title' }, a.Action || 'Action'),
-      h('div', { class: 'sub' }, [inProject ? null : a['BD Project Name'], showOwner ? a.Owner : null, a.Location].filter(x => !B.isBlank(x)).join(', '))),
+      h('div', { class: 'sub' }, [inProject ? null : a['BD Project Name'], showOwner ? a.Owner : null, a.Location].filter(x => !B.isBlank(x)).join(', ')),
+      // Omar, 20 Oct 2026: who added the action
+      !B.isBlank(a['Created By']) ? h('div', { class: 'sub by' }, 'Added by ' + a['Created By']) : null),
     h('div', { class: 'meta' }, h('div', { style: dueLate ? 'color:var(--red);font-weight:600' : '' }, fmtDate(a['Due Date'])), statusBadge(a.Status)));
 }
 
@@ -479,7 +491,7 @@ export function actionsAtScreen(loc, whoParam) {
   return { title: place + ' actions', back: '#/actions', node, live: true, redraw: draw, fab: { label: 'Add action', href: '#/new/Action%20Tracker' } };
 }
 
-const ACTION_DETAIL = ['Action', 'BD Project Name', 'Criticality', 'Owner', 'Due Date', 'Location', 'Estimated Time', 'Status', 'Created at'];
+const ACTION_DETAIL = ['Action', 'BD Project Name', 'Criticality', 'Owner', 'Due Date', 'Location', 'Estimated Time', 'Status', 'Created By', 'Created at'];
 
 export function actionScreen(key) {
   const node = h('div');

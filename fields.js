@@ -111,26 +111,31 @@ function fileRow(table, col, rec, rule) {
       } }, '×') : null));
   });
   if (list.length) dd.append(ul);
+  const row = h('div', { class: 'field-row file' }, h('dt', null, B.labelOf(table, col)), dd);
   if (canEdit && list.length < B.MAX_FILES) {
-    dd.append(filePickerButtons(type, async (f) => {
+    const add = async (f) => {
       await enqueue({ op: 'upload', table, key, column: col, fileName: f.name, mimeType: f.mimeType, data: f.data }, 'Upload ' + f.name);
       toast('Added. It uploads when online.');
-    }, list.length ? 'Add another' : 'Upload'));
+    };
+    dd.append(filePickerButtons(type, add, list.length ? 'Add another' : 'Upload'));
+    dropTarget(row, type, add, B.MAX_FILES - list.length);
   }
-  return h('div', { class: 'field-row file' }, h('dt', null, B.labelOf(table, col)), dd);
+  return row;
 }
 
 /* ---------- picking files and photos ---------- */
 export function filePickerButtons(type, onPicked, verb = 'Upload') {
   const wrap = h('span', { class: 'filepick' });
   const make = (label, ic, accept, capture) => {
-    const input = h('input', { type: 'file', accept, hidden: true, capture: capture || null });
+    // several files can be chosen at once (not with the camera)
+    const input = h('input', { type: 'file', accept, hidden: true, capture: capture || null, multiple: capture ? null : true });
     input.addEventListener('change', async () => {
-      const file = input.files && input.files[0];
+      const picked = Array.from(input.files || []);
       input.value = '';
-      if (!file) return;
-      try { onPicked(await readPicked(file)); }
-      catch (e) { toast(e.message, { error: true }); }
+      for (const file of picked) {
+        try { await onPicked(await readPicked(file)); }
+        catch (e) { toast(file.name + ': ' + e.message, { error: true }); }
+      }
     });
     return [input, h('button', { type: 'button', class: 'btn small', onclick: () => input.click() }, iconEl(ic), label)];
   };
@@ -140,6 +145,32 @@ export function filePickerButtons(type, onPicked, verb = 'Upload') {
     wrap.append(...make(verb + ' file', 'upload', 'application/pdf,image/*,.doc,.docx,.xls,.xlsx'));
   }
   return wrap;
+}
+
+/* Drag and drop (Omar, 20 Oct 2026): files dropped on a file field are added
+ * exactly as if they were chosen with the button. Photo fields take images only. */
+export function dropTarget(el, type, onPicked, room = B.MAX_FILES) {
+  let depth = 0;
+  const hasFiles = e => Array.from((e.dataTransfer && e.dataTransfer.types) || []).includes('Files');
+  el.classList.add('droppable');
+  el.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; el.classList.add('drop-over'); });
+  el.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  el.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) el.classList.remove('drop-over'); });
+  el.addEventListener('drop', async e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); depth = 0; el.classList.remove('drop-over');
+    let list = Array.from(e.dataTransfer.files || []);
+    if (type === 'image') {
+      const skipped = list.filter(f => !/^image\//.test(f.type));
+      if (skipped.length) toast('Only photos can go here. Skipped: ' + skipped.map(f => f.name).join(', '), { error: true });
+      list = list.filter(f => /^image\//.test(f.type));
+    }
+    if (list.length > room) { toast('Only ' + room + ' more file(s) fit here. The first ' + room + ' were added.', { error: true }); list = list.slice(0, room); }
+    for (const file of list) {
+      try { await onPicked(await readPicked(file)); }
+      catch (err) { toast(file.name + ': ' + err.message, { error: true }); }
+    }
+  });
 }
 
 async function readPicked(file) {
@@ -271,7 +302,9 @@ export function renderForm({ table, record, isNew, context = {}, onDone, submitT
         const name = h('span', { class: 'name' });
         const show = () => { const add = (files[col] || []).map(f => f.name + ' (will upload)'); name.textContent = have.concat(add).join(', ') || 'No file'; };
         show();
-        wrap.append(h('div', { class: 'filepick' }, name, filePickerButtons(c.type, f => { (files[col] = files[col] || []).push(f); show(); }, have.length || files[col] ? 'Add another' : 'Choose')));
+        const pick = f => { (files[col] = files[col] || []).push(f); show(); };
+        wrap.append(h('div', { class: 'filepick' }, name, filePickerButtons(c.type, pick, have.length || files[col] ? 'Add another' : 'Choose')));
+        dropTarget(wrap, c.type, pick, B.MAX_FILES - have.length);
         return wrap;
       }
       default:

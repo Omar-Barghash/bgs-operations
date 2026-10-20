@@ -170,7 +170,9 @@ var BGS = (function () {
         { name: 'Due Date', type: 'date' },
         { name: 'Status', type: 'text', auto: true },
         { name: 'Estimated Time', type: 'decimal', label: 'Estimated Time (hours)' },
-        { name: 'Location', type: 'ref', ref: 'Locations' }
+        { name: 'Location', type: 'ref', ref: 'Locations' },
+        // Omar, 20 Oct 2026: who added the action (filled in by the API, never typed)
+        { name: 'Created By', type: 'text', auto: true, optional: true }
       ]
     },
     'Locations': {
@@ -414,7 +416,8 @@ var BGS = (function () {
         return itemNeeds(d.items, function (it) {
           var n = [];
           if (!isTrue(it.Delivered)) n.push('mark as Delivered');
-          if (isBlank(it.Execution_Photos)) n.push('add an execution photo');
+          // Omar, 20 Oct 2026: Logistics items (delivery, transport) need no photo
+          if (isBlank(it.Execution_Photos) && !photoOptional(it)) n.push('add an execution photo');
           return n;
         });
       } },
@@ -473,6 +476,8 @@ var BGS = (function () {
   }
 
   /* ---------- Items: selling price (SOURCE: Selling_Price initial + Reset_If) ---------- */
+  function photoOptional(item) { return /^logistic/i.test(norm(item && item.Item_Type)); }
+
   function sellingPriceRule(item) {
     var sp = item.Selling_Price;
     if (isBlank(sp) || Number(sp) === 0) {
@@ -507,6 +512,6 @@ var BGS = (function () {
     fieldRule: fieldRule, canAdd: canAdd, canDelete: canDelete,
     customersForCompany: customersForCompany, nextMove: nextMove, moveAccessNote: moveAccessNote, ACCESS: ACCESS, can: can, accessFromRow: accessFromRow, previousStage: previousStage, moveTo: moveTo, canReject: canReject,
     isOpenAction: isOpenAction, statusForNewAction: statusForNewAction, statusAfterEdit: statusAfterEdit,
-    sellingPriceRule: sellingPriceRule, bdProjectName: bdProjectName
+    sellingPriceRule: sellingPriceRule, photoOptional: photoOptional, bdProjectName: bdProjectName
   };
 })();

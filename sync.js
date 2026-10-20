@@ -144,7 +144,7 @@ function applyLocal(t, ch) {
     } else if (ch.table === 'Action Tracker') {
       const p = B.isBlank(rec['Project #']) ? null : findIn(t, 'Projects', rec['Project #']);
       Object.assign(rec, { 'Action #': k, Owner: B.isBlank(rec.Owner) ? u.name : rec.Owner, 'Project #': p ? p['P#'] : 0,
-        'BD Project Name': p ? p['BD Project Name'] : '', Criticality: p ? p.Criticality : '' });
+        'BD Project Name': p ? p['BD Project Name'] : '', Criticality: p ? p.Criticality : '', 'Created By': u.name || u.email });
       if (B.isBlank(rec['Created at'])) rec['Created at'] = today;
       if (B.isBlank(rec['Due Date'])) rec['Due Date'] = today;
       rec.Status = B.statusForNewAction(rec['Due Date'], today);
