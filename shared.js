@@ -57,7 +57,9 @@ var BGS = (function () {
         { name: 'Invoice', type: 'file' },
         // Omar, 14 Oct 2026: a SUMIF of the project's items, or a number typed by hand
         { name: 'Total_Cost', type: 'price', label: 'Total Cost', optional: true },
-        { name: 'Total_Price', type: 'price', label: 'Total Price', optional: true }
+        { name: 'Total_Price', type: 'price', label: 'Total Price', optional: true },
+        // Omar, 6 Nov 2026: who looks after the project (the creator unless changed)
+        { name: 'Project Owner', type: 'ref', ref: 'Users', optional: true }
       ]
     },
     'Items': {
@@ -98,6 +100,18 @@ var BGS = (function () {
         { name: 'Move to Executing', type: 'bool', optional: true },
         { name: 'Move to Payment', type: 'bool', optional: true },
         { name: 'Move to Done', type: 'bool', optional: true }
+      ]
+    },
+    // Omar, 6 Nov 2026: notes written inside a project, shown at the bottom of it
+    'Project_Notes': {
+      sheet: 'Project_Notes', key: 'Note_ID', keyType: 'text', label: 'Note_ID', parent: { table: 'Projects', column: 'Project_ID' },
+      optionalSheet: true, // the app keeps working (without notes) until the tab exists
+      columns: [
+        { name: 'Note_ID', type: 'text', label: 'Note ID', auto: true },
+        { name: 'Project_ID', type: 'ref', ref: 'Projects', label: 'Project #' },
+        { name: 'Note', type: 'longtext' },
+        { name: 'Created_By', type: 'text', label: 'Written by', auto: true },
+        { name: 'Created_At', type: 'datetime', label: 'Written at', auto: true }
       ]
     },
     'Stage_History': {
@@ -354,8 +368,10 @@ var BGS = (function () {
     if (table === 'Users') return PERM.manageUsers(user);
     return true; // SOURCE: every table has an unrestricted "Add" action
   }
-  function canDelete(table, user) {
+  function canDelete(table, user, row) {
     if (table === 'Projects') return false; // SOURCE: ADDS_AND_UPDATES only
+    // Omar, 6 Nov 2026: a note can be removed by the person who wrote it (or a user manager)
+    if (table === 'Project_Notes') return !row || same(row.Created_By, user && user.name) || PERM.manageUsers(user);
     if (table === 'Users') return PERM.manageUsers(user);
     return true; // SOURCE: Delete actions have no condition
   }

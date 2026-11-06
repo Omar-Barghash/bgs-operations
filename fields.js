@@ -11,7 +11,7 @@ const B = window.BGS;
 /* Column order of each form (SOURCE: AppSheet form views' ColumnOrder;
  * "null" in AppSheet means all columns in table order). */
 const FORM_ORDER = {
-  'Projects': ['Stage', 'BD Project Name', 'Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'PO_No', 'Invoice#', 'Expected Cash In', 'Documentation_Verified', 'Satisfaction_Completed', 'Rejection Reason', 'Total_Cost', 'Total_Price', 'Quotation', 'PO', 'Invoice'],
+  'Projects': ['Stage', 'BD Project Name', 'Project Name', 'Company', 'Customer', 'Project Owner', 'Contract#', 'Quotation_No', 'PO_No', 'Invoice#', 'Expected Cash In', 'Documentation_Verified', 'Satisfaction_Completed', 'Rejection Reason', 'Total_Cost', 'Total_Price', 'Quotation', 'PO', 'Invoice'],
   'Action Tracker': ['Project #', 'BD Project Name', 'Criticality', 'Action', 'Owner', 'Due Date', 'Estimated Time', 'Location', 'Status', 'Created at']
 };
 /* Project totals (Omar, 14-15 Oct 2026): quantity x unit price, added up over the
@@ -441,14 +441,14 @@ function refLabel(table, v) {
   return String(v);
 }
 export function humanTable(t) {
-  return ({ 'Projects': 'project', 'Items': 'item', 'Action Tracker': 'action', 'Customer_Satisfaction': 'satisfaction record', 'Quality_Checks': 'quality check', 'Stage_History': 'history entry', 'Lists': 'company', 'Customers': 'customer', 'Locations': 'location', 'Item Type': 'item category', 'Users': 'user' })[t] || 'record';
+  return ({ 'Projects': 'project', 'Items': 'item', 'Action Tracker': 'action', 'Customer_Satisfaction': 'satisfaction record', 'Quality_Checks': 'quality check', 'Stage_History': 'history entry', 'Project_Notes': 'note', 'Lists': 'company', 'Customers': 'customer', 'Locations': 'location', 'Item Type': 'item category', 'Users': 'user' })[t] || 'record';
 }
 
 /** Starting values shown on a new form (the server sets the real ones). */
 function previewDefaults(table, rec, ctx) {
   const today = model.today || new Date().toISOString().slice(0, 10);
   const out = Object.assign({}, ctx);
-  if (table === 'Projects') { out.Stage = B.S.S1; out.Documentation_Verified = false; }
+  if (table === 'Projects') { out.Stage = B.S.S1; out.Documentation_Verified = false; if (B.isBlank(rec['Project Owner'])) out['Project Owner'] = model.user && model.user.name; }
   if (table === 'Items') { out.Delivery_Date = rec.Delivery_Date || today; const p = findRecord('Projects', ctx.Project_ID); if (p) out['BD Project Name'] = p['BD Project Name']; }
   if (table === 'Action Tracker') {
     out.Owner = model.user && model.user.name; out['Created at'] = today; out['Due Date'] = rec['Due Date'] || today; out.Status = 'In Progress';

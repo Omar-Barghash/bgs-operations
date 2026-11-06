@@ -221,6 +221,13 @@ main#view {
 .row .meta .unit-price { font-size: 12px; color: var(--ink-3); }
 .row .meta .row-price { font-weight: 600; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .row .sub.by { color: var(--ink-3); font-size: 12px; }
+/* project notes (6 Nov 2026) */
+.note-composer { padding: 0 16px 12px; display: grid; gap: 8px; }
+.note-composer textarea { min-height: 84px; resize: vertical; }
+.note-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.note-row { align-items: flex-start; }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.note-row.pending { opacity: .75; }
 /* drag and drop onto file fields (20 Oct 2026) */
 .droppable { position: relative; }
 .drop-over { outline: 2px dashed var(--blue); outline-offset: -2px; background: var(--blue-soft); }

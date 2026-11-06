@@ -3,7 +3,7 @@
  * live = true means the screen redraws itself when new data arrives
  * (forms are not live, so typing is never interrupted). */
 import { h, iconEl, icon, toast, confirmDialog, promptDialog, fmtDate, fmtMoney, fmtNumber, relTime, stageShort } from './ui.js';
-import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp } from './sync.js';
+import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp, newTempKey } from './sync.js';
 import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, projectTotal, lineTotal } from './fields.js';
 import { CONFIG } from './config.js';
 
@@ -12,6 +12,13 @@ const S = B.S;
 const sameKey = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 let navList = { keys: [], from: '#/active' };
 const ui = { active: { q: '', sel: null, open: {} }, all: { q: '', sel: null, open: {} }, actions: { tab: 'mine', q: '' } };
+/* Omar, 6 Nov 2026: project lists show all projects, or only the ones I own.
+ * The choice is remembered on this phone. */
+const OWNER_KEY = 'bgs.projectsShow';
+function savedOwnerChoice() { try { return localStorage.getItem(OWNER_KEY) === 'mine' ? 'mine' : 'all'; } catch (e) { return 'all'; } }
+let ownerChoice = savedOwnerChoice();
+function setOwnerChoice(v) { ownerChoice = v; try { localStorage.setItem(OWNER_KEY, v); } catch (e) { /* not kept, fine */ } }
+function ownedByMe(p) { return !!(model.user && B.same(p['Project Owner'], model.user.name)); }
 
 /* ================= shared pieces ================= */
 
@@ -68,12 +75,18 @@ export function projectsScreen(mode) {
   // The search box is built once and never redrawn, so the phone keyboard stays open while typing.
   const selBtn = h('button', { class: 'btn small', onclick: () => { st.sel = st.sel ? null : new Set(); draw(); } });
   const body = h('div');
-  node.append(h('div', { class: 'toolbar' }, searchBox(st, 'Search projects', () => draw()), selBtn), body);
+  const allBtn = h('button', { onclick: () => { setOwnerChoice('all'); draw(); } }, isActive ? 'All active projects' : 'All projects');
+  const mineBtn = h('button', { onclick: () => { setOwnerChoice('mine'); draw(); } }, 'Projects I own');
+  node.append(h('div', { class: 'segmented', role: 'group', 'aria-label': 'Which projects to show' }, allBtn, mineBtn),
+    h('div', { class: 'toolbar' }, searchBox(st, 'Search projects', () => draw()), selBtn), body);
   function draw() {
     selBtn.textContent = st.sel ? 'Done' : 'Select';
     selBtn.setAttribute('aria-pressed', st.sel ? 'true' : 'false');
+    allBtn.setAttribute('aria-pressed', ownerChoice === 'all' ? 'true' : 'false');
+    mineBtn.setAttribute('aria-pressed', ownerChoice === 'mine' ? 'true' : 'false');
     body.innerHTML = '';
     let list = model.view.Projects.filter(p => isActive ? !B.inList(p.Stage, [S.S6, S.S7]) : true);
+    if (ownerChoice === 'mine') list = list.filter(ownedByMe);
     list = list.filter(p => matches(p, PROJECT_SEARCH, st.q)).sort((a, b) => (Number(a['P#']) || 1e9) - (Number(b['P#']) || 1e9));
     const groups = isActive ? [S.S1, S.S2, S.S3, S.S4, S.S5] : B.STAGES;
     // remember the order shown, so the project screen can swipe to the next / previous one
@@ -82,7 +95,9 @@ export function projectsScreen(mode) {
     if (!isActive) list.filter(p => !B.inList(p.Stage, groups)).forEach(p => navList.keys.push(String(p['P#'])));
     if (!list.length) {
       body.append(model.lastSync || model.view.Projects.length
-        ? emptyState(st.q ? 'No matching projects' : 'No active projects', st.q ? 'Try a different word, or clear the search.' : 'Add a project to start the pipeline.')
+        ? (ownerChoice === 'mine' && !st.q
+          ? emptyState('No projects owned by you', 'Projects you create are yours. To take over another project, open it, tap Edit and choose yourself as Project Owner.', h('button', { class: 'btn', onclick: () => { setOwnerChoice('all'); draw(); } }, 'Show all projects'))
+          : emptyState(st.q ? 'No matching projects' : 'No active projects', st.q ? 'Try a different word, or clear the search.' : 'Add a project to start the pipeline.'))
         : emptyState('Loading projects', 'The first download can take a few seconds.'));
       return;
     }
@@ -158,7 +173,7 @@ function bulkBar(st, redraw) {
 
 /* ================= project detail ================= */
 
-const PROJECT_DETAIL = ['Project Name', 'Company', 'Customer', 'Contract#', 'Quotation_No', 'Quotation', 'PO_No', 'PO', 'Invoice#', 'Invoice', 'Expected Cash In', 'Rejection Reason', 'Documentation_Verified', 'Satisfaction_Completed'];
+const PROJECT_DETAIL = ['Project Name', 'Company', 'Customer', 'Project Owner', 'Contract#', 'Quotation_No', 'Quotation', 'PO_No', 'PO', 'Invoice#', 'Invoice', 'Expected Cash In', 'Rejection Reason', 'Documentation_Verified', 'Satisfaction_Completed'];
 
 /* Swipe left / right on a project to open the next / previous one (Omar, 9 Oct 2026).
  * The order is the list the project was opened from (Active or Projects, with any
@@ -297,6 +312,9 @@ export function projectScreen(key) {
       sectionHead('Actions', acts.length, h('a', { class: 'btn small', href: '#/new/Action%20Tracker?' + new URLSearchParams({ 'Project #': pnum }) }, iconEl('plus'), 'Add actions')),
       acts.length ? h('div', { class: 'list' }, acts.map(a => actionRow(a, true, true))) : null));
 
+    // Notes (Omar, 6 Nov 2026): written inside the project, newest first
+    node.append(notesSection(pnum));
+
     // Stage history (hidden column in AppSheet; shown here folded, read-only)
     const hist = model.view.Stage_History.filter(x => sameKey(x.Project_ID, pnum)).sort((a, b) => String(b.Changed_At).localeCompare(String(a.Changed_At)));
     if (hist.length) {
@@ -307,6 +325,51 @@ export function projectScreen(key) {
   }
   draw();
   return { title: 'Project', back: navList.keys.includes(String(key)) ? navList.from : '#/active', node, live: true, redraw: draw };
+}
+
+/* Notes at the bottom of a project (Omar, 6 Nov 2026). "Add note" opens a box
+ * right here; the writer can remove their own note. */
+let noteDraft = { key: null, open: false, text: '' };
+function notesSection(pnum) {
+  const notes = (model.view.Project_Notes || []).filter(n => sameKey(n.Project_ID, pnum))
+    .sort((a, b) => String(b.Created_At).localeCompare(String(a.Created_At)));
+  if (noteDraft.key !== String(pnum)) noteDraft = { key: String(pnum), open: false, text: '' };
+  const sec = h('div', { class: 'section notes' });
+  const temp = isTemp(pnum);
+  const addBtn = temp ? null : h('button', { class: 'btn small', 'aria-expanded': noteDraft.open ? 'true' : 'false', onclick: () => { noteDraft.open = true; drawBox(); } }, iconEl('plus'), 'Add note');
+  sec.append(sectionHead('Notes', notes.length, addBtn));
+  const box = h('div');
+  sec.append(box);
+  function drawBox() {
+    box.innerHTML = '';
+    if (addBtn) addBtn.hidden = noteDraft.open;
+    if (!noteDraft.open) return;
+    const ta = h('textarea', { class: 'input', id: 'note-text', rows: 3, maxlength: 5000, placeholder: 'Write a note about this project', 'aria-label': 'New note', oninput: e => { noteDraft.text = e.target.value; save.disabled = !e.target.value.trim(); } });
+    ta.value = noteDraft.text;
+    const save = h('button', { class: 'btn primary small', disabled: !noteDraft.text.trim(), onclick: async () => {
+      const text = noteDraft.text.trim();
+      if (!text) return;
+      noteDraft = { key: String(pnum), open: false, text: '' };
+      await enqueue({ op: 'create', table: 'Project_Notes', tempKey: newTempKey(), fields: { Project_ID: pnum, Note: text } }, 'Add a note to project ' + pnum);
+      toast('Note added.');
+    } }, 'Save note');
+    const cancel = h('button', { class: 'btn small', onclick: () => { noteDraft = { key: String(pnum), open: false, text: '' }; drawBox(); } }, 'Cancel');
+    box.append(h('div', { class: 'note-composer' }, ta, h('div', { class: 'note-buttons' }, cancel, save)));
+    setTimeout(() => ta.focus(), 0);
+  }
+  drawBox();
+  if (temp) sec.append(h('div', { class: 'list' }, h('div', { class: 'note' }, 'Notes can be added once the project has synced.')));
+  else if (!notes.length) sec.append(h('div', { class: 'list' }, h('div', { class: 'note' }, 'No notes yet.')));
+  else sec.append(h('div', { class: 'list note-list' }, notes.map(n => h('div', { class: 'row note-row' + (n.__pending ? ' pending' : '') },
+    h('div', { class: 'main' },
+      h('div', { class: 'note-text' }, n.Note),
+      h('div', { class: 'sub' }, [n.Created_By, fmtDate(n.Created_At)].filter(Boolean).join(', '), n.__pending ? ' (not yet synced)' : '')),
+    B.canDelete('Project_Notes', model.user, n) && !isTemp(n.Note_ID) ? h('button', { class: 'icon-btn', 'aria-label': 'Delete this note', html: icon.trash, onclick: async () => {
+      if (!await confirmDialog({ title: 'Delete this note?', message: 'The note is removed for everyone.', confirmText: 'Delete', danger: true })) return;
+      await enqueue({ op: 'delete', table: 'Project_Notes', key: n.Note_ID }, 'Delete a note');
+      toast('Note deleted.');
+    } }) : null))));
+  return sec;
 }
 
 function stageTrack(p) {

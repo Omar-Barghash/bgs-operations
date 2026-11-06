@@ -107,7 +107,7 @@ function describe(ch) {
   }
 }
 function singular(t) {
-  return ({ 'Projects': 'project', 'Items': 'item', 'Action Tracker': 'action', 'Customer_Satisfaction': 'satisfaction record', 'Quality_Checks': 'quality check', 'Stage_History': 'history entry', 'Lists': 'company', 'Customers': 'customer', 'Locations': 'location', 'Item Type': 'item category', 'Users': 'user' })[t] || 'record';
+  return ({ 'Projects': 'project', 'Items': 'item', 'Action Tracker': 'action', 'Customer_Satisfaction': 'satisfaction record', 'Quality_Checks': 'quality check', 'Stage_History': 'history entry', 'Project_Notes': 'note', 'Lists': 'company', 'Customers': 'customer', 'Locations': 'location', 'Item Type': 'item category', 'Users': 'user' })[t] || 'record';
 }
 
 /** Rebuild the view: server snapshot + every unconfirmed change on top. */
@@ -134,6 +134,7 @@ function applyLocal(t, ch) {
     const k = ch.tempKey;
     if (ch.table === 'Projects') {
       const company = findIn(t, 'Lists', rec.Company);
+      if (B.isBlank(rec['Project Owner'])) rec['Project Owner'] = u.name;
       Object.assign(rec, { 'P#': k, Stage: B.S.S1, Created_By: u.email, Documentation_Verified: false,
         'BD Project Name': B.bdProjectName('New', company ? company['Company Code'] : '', rec['Project Name']) });
     } else if (ch.table === 'Items') {
@@ -152,6 +153,8 @@ function applyLocal(t, ch) {
       Object.assign(rec, { Satisfaction_ID: k, Submitted_By: u.email, Submitted_At: now });
     } else if (ch.table === 'Stage_History') {
       Object.assign(rec, { History_ID: k, Changed_By: u.name, Changed_At: now });
+    } else if (ch.table === 'Project_Notes') {
+      Object.assign(rec, { Note_ID: k, Created_By: u.name || u.email, Created_At: now });
     } else if (ch.table === 'Quality_Checks') {
       rec.Check_ID = k;
     }
