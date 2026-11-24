@@ -99,7 +99,9 @@ var BGS = (function () {
         { name: 'Move to Approval', type: 'bool', optional: true },
         { name: 'Move to Executing', type: 'bool', optional: true },
         { name: 'Move to Payment', type: 'bool', optional: true },
-        { name: 'Move to Done', type: 'bool', optional: true }
+        { name: 'Move to Done', type: 'bool', optional: true },
+        // Omar, 24 Nov 2026: Taxes dashboard (legal ETA figures) – only people ticked here
+        { name: 'Taxes Dashboard', type: 'bool', optional: true }
       ]
     },
     // Omar, 6 Nov 2026: notes written inside a project, shown at the bottom of it
@@ -243,7 +245,9 @@ var BGS = (function () {
     { key: 'moveToApproval', column: 'Move to Approval', label: 'Move projects to Waiting for Approval', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
     { key: 'moveToExecuting', column: 'Move to Executing', label: 'Move projects to Executing', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
     { key: 'moveToPayment', column: 'Move to Payment', label: 'Move projects to Waiting for Payment', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
-    { key: 'moveToDone', column: 'Move to Done', label: 'Move projects to Done', legacy: function (u) { return deptIn(u, [DEPT.BD, DEPT.MGMT]); } }
+    { key: 'moveToDone', column: 'Move to Done', label: 'Move projects to Done', legacy: function (u) { return deptIn(u, [DEPT.BD, DEPT.MGMT]); } },
+    // Omar, 24 Nov 2026: Taxes tab (this month's profit from ETA invoices, tax gap). Nobody sees it unless ticked.
+    { key: 'taxesDashboard', column: 'Taxes Dashboard', label: 'Taxes dashboard', legacy: function () { return false; } }
   ];
   function accessDef(key) { for (var i = 0; i < ACCESS.length; i++) { if (ACCESS[i].key === key) return ACCESS[i]; } return null; }
   /* user.access = { key: true/false } for every tick column present in the Users sheet */
@@ -268,7 +272,8 @@ var BGS = (function () {
     seeContract: function (u) { return can(u, 'seeContract'); },
     seeFinance: function (u) { return can(u, 'seeFinance'); },
     verifyDocs: function (u) { return can(u, 'verifyDocs'); },
-    manageUsers: function (u) { return can(u, 'manageUsers'); }
+    manageUsers: function (u) { return can(u, 'manageUsers'); },
+    seeTaxes: function (u) { return can(u, 'taxesDashboard'); }
   };
 
   /* Columns the API never sends to a user who may not see them. */

@@ -6,6 +6,7 @@ import { h, iconEl, icon, toast, confirmDialog, promptDialog, fmtDate, fmtMoney,
 import { model, enqueue, syncNow, pendingCount, attentionCount, discardChange, retryChange, keepMine, keepTheirs, signOut, isTemp, newTempKey } from './sync.js';
 import { renderForm, fieldList, findRecord, ruleFor, refHref, humanTable, valueNode, projectTotal, lineTotal } from './fields.js';
 import { CONFIG } from './config.js';
+import { call } from './api.js';
 
 const B = window.BGS;
 const S = B.S;
@@ -774,4 +775,73 @@ function conflictCard(k) {
     h('div', { class: 'btns' },
       ch.op === 'update' ? h('button', { class: 'btn small primary', onclick: () => keepMine(k.id) }, 'Keep mine') : null,
       h('button', { class: 'btn small', onclick: () => keepTheirs(k.id) }, ch.op === 'update' ? 'Keep theirs' : 'OK')));
+}
+
+
+/* ================= taxes dashboard (Omar, 24 Nov 2026) =================
+ * Legal figures from the ETA e-invoicing portal (ETA Legal Accounting sheet,
+ * updated every hour). Read live from the server, never stored on the phone.
+ *  - profit of the month from Valid reported documents: sales − purchases,
+ *    credit notes reduce and debit notes add; all ex-VAT;
+ *  - the total tax gap and the categories that make up the top 80% of it, in kEGP. */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function thisMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+function shiftMonth(ym, n) { let [y, m] = ym.split('-').map(Number); m += n; while (m < 1) { m += 12; y--; } while (m > 12) { m -= 12; y++; } return y + '-' + String(m).padStart(2, '0'); }
+function monthLabel(ym) { const [y, m] = ym.split('-').map(Number); return MONTHS[m - 1] + ' ' + y; }
+const egp = v => fmtNumber(Math.round(v)) + ' EGP';
+const kegp = v => fmtNumber(Math.round(v)) + ' kEGP';
+
+export function taxesScreen(monthParam) {
+  const month = /^\d{4}-\d{2}$/.test(monthParam || '') ? monthParam : thisMonth();
+  const node = h('div');
+  const body = h('div', null, h('p', { class: 'note' }, 'Loading the figures from the tax portal data…'));
+  const nav = h('div', { class: 'month-nav' },
+    h('a', { class: 'btn small', href: '#/taxes?m=' + shiftMonth(month, -1), 'aria-label': 'Previous month' }, '‹'),
+    h('div', { class: 'month-label' }, monthLabel(month)),
+    month < thisMonth() ? h('a', { class: 'btn small', href: '#/taxes?m=' + shiftMonth(month, 1), 'aria-label': 'Next month' }, '›') : h('span', { class: 'btn small', 'aria-hidden': 'true', style: 'visibility:hidden' }, '›'));
+  node.append(nav, body);
+
+  const tile = (label, value, note, cls) => h('div', { class: 'total' + (cls ? ' ' + cls : '') },
+    h('div', { class: 'total-label' }, label), h('div', { class: 'total-value' }, value), note ? h('div', { class: 'total-note' }, note) : null);
+  const count = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+
+  function draw(d) {
+    body.innerHTML = '';
+    const p = d.profit, c = p.counts;
+    body.append(h('div', { class: 'section' }, sectionHead('Profit – ' + monthLabel(d.month)),
+      h('div', { class: 'totals', role: 'group', 'aria-label': 'Profit this month' },
+        tile('Profit (reported)', egp(p.profit), 'Net sales − net purchases, ex-VAT', p.profit < 0 ? 'neg' : 'pos'),
+        tile('Sales', egp(p.sales), count(c.sales, 'invoice')),
+        tile('Sales credit notes', '− ' + egp(p.salesCredit), count(c.salesCredit, 'note') + (c.salesDebit ? ' · debit notes + ' + egp(p.salesDebit) : '')),
+        tile('Purchases', egp(p.purchases), count(c.purchases, 'invoice')),
+        tile('Purchase credit notes', '− ' + egp(p.purchaseCredit), count(c.purchaseCredit, 'note') + (c.purchaseDebit ? ' · debit notes + ' + egp(p.purchaseDebit) : '')))));
+
+    const g = d.gap || {};
+    const gapSec = h('div', { class: 'section' }, sectionHead('Tax gap'));
+    if (g.missing) gapSec.append(h('p', { class: 'note' }, 'The gap table ("Pivot Table 1") was not found in the ETA Legal Accounting sheet.'));
+    else {
+      gapSec.append(h('div', { class: 'totals' }, tile('Total gap', kegp(g.total), 'Column D of the ETA Legal Accounting sheet', g.total > 0 ? 'neg' : 'pos')));
+      gapSec.append(h('div', { class: 'section-head', style: 'margin-top:12px' }, 'Top ' + Math.round((g.topShare || 0.8) * 100) + '% of the gap', h('span', { class: 'count' }, String(g.categories.length))));
+      gapSec.append(h('div', { class: 'list' }, g.categories.map(cat => h('div', { class: 'row gap-row' },
+        h('div', { class: 'main' }, h('div', { class: 'title' }, cat.name),
+          h('div', { class: 'gap-bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(cat.share * 100)) + '%' })),
+          h('div', { class: 'sub' }, Math.round(cat.share * 100) + '% of the gap · ' + Math.round(cat.cumulative * 100) + '% together')),
+        h('div', { class: 'meta' }, h('span', { class: 'row-price' }, kegp(cat.gap)))))));
+    }
+    body.append(gapSec);
+    body.append(h('p', { class: 'note' }, 'Source: ETA e-invoicing portal (Valid documents only), updated every hour. Read at ' + d.updatedAt + '.'));
+  }
+
+  function fail(e) {
+    body.innerHTML = '';
+    const offline = e && (e.code === 'NETWORK' || (typeof navigator !== 'undefined' && navigator.onLine === false));
+    body.append(h('div', { class: 'banner ' + (offline ? 'warn' : 'error') }, offline ? 'The Taxes tab needs an internet connection. It is not stored on the phone.' : (e && e.message) || 'Could not load the figures.'),
+      h('div', { class: 'actions-bar' }, h('button', { class: 'btn primary', onclick: load }, iconEl('refresh'), 'Try again')));
+  }
+  function load() {
+    body.innerHTML = ''; body.append(h('p', { class: 'note' }, 'Loading the figures from the tax portal data…'));
+    call('taxes', { month }, model.token).then(draw, fail);
+  }
+  load();
+  return { title: 'Taxes', node, live: false };
 }
