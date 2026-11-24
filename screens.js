@@ -790,6 +790,11 @@ function shiftMonth(ym, n) { let [y, m] = ym.split('-').map(Number); m += n; whi
 function monthLabel(ym) { const [y, m] = ym.split('-').map(Number); return MONTHS[m - 1] + ' ' + y; }
 const egp = v => fmtNumber(Math.round(v)) + ' EGP';
 const kegp = v => fmtNumber(Math.round(v)) + ' kEGP';
+/* v1.10.1 (Omar, 24 Nov 2026): one download brings every month; it is kept in memory for
+ * 10 minutes, so moving between months is instant. Never stored on the phone. */
+const TAXES_KEEP_MS = 10 * 60 * 1000;
+let taxesCache = null; // { at, data }
+const blankProfit = () => ({ sales: 0, salesCredit: 0, salesDebit: 0, purchases: 0, purchaseCredit: 0, purchaseDebit: 0, profit: 0, counts: { sales: 0, salesCredit: 0, salesDebit: 0, purchases: 0, purchaseCredit: 0, purchaseDebit: 0 } });
 
 export function taxesScreen(monthParam) {
   const month = /^\d{4}-\d{2}$/.test(monthParam || '') ? monthParam : thisMonth();
@@ -804,17 +809,17 @@ export function taxesScreen(monthParam) {
   const tile = (label, value, note, cls) => h('div', { class: 'total' + (cls ? ' ' + cls : '') },
     h('div', { class: 'total-label' }, label), h('div', { class: 'total-value' }, value), note ? h('div', { class: 'total-note' }, note) : null);
   const count = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+  // credit / debit notes are counted in the profit; mentioned under Sales / Purchases only when there are any
+  const notesText = (cr, crN, dr, drN) => (crN ? ' · credit notes − ' + egp(cr) : '') + (drN ? ' · debit notes + ' + egp(dr) : '');
 
   function draw(d) {
     body.innerHTML = '';
     const p = d.profit, c = p.counts;
     body.append(h('div', { class: 'section' }, sectionHead('Profit – ' + monthLabel(d.month)),
       h('div', { class: 'totals', role: 'group', 'aria-label': 'Profit this month' },
-        tile('Profit (reported)', egp(p.profit), 'Net sales − net purchases, ex-VAT', p.profit < 0 ? 'neg' : 'pos'),
-        tile('Sales', egp(p.sales), count(c.sales, 'invoice')),
-        tile('Sales credit notes', '− ' + egp(p.salesCredit), count(c.salesCredit, 'note') + (c.salesDebit ? ' · debit notes + ' + egp(p.salesDebit) : '')),
-        tile('Purchases', egp(p.purchases), count(c.purchases, 'invoice')),
-        tile('Purchase credit notes', '− ' + egp(p.purchaseCredit), count(c.purchaseCredit, 'note') + (c.purchaseDebit ? ' · debit notes + ' + egp(p.purchaseDebit) : '')))));
+        tile('Profit (reported)', egp(p.profit), 'Sales − purchases after credit notes, ex-VAT', p.profit < 0 ? 'neg' : 'pos'),
+        tile('Sales', egp(p.sales), count(c.sales, 'invoice') + notesText(p.salesCredit, c.salesCredit, p.salesDebit, c.salesDebit)),
+        tile('Purchases', egp(p.purchases), count(c.purchases, 'invoice') + notesText(p.purchaseCredit, c.purchaseCredit, p.purchaseDebit, c.purchaseDebit)))));
 
     const g = d.gap || {};
     const gapSec = h('div', { class: 'section' }, sectionHead('Tax gap'));
@@ -836,11 +841,13 @@ export function taxesScreen(monthParam) {
     body.innerHTML = '';
     const offline = e && (e.code === 'NETWORK' || (typeof navigator !== 'undefined' && navigator.onLine === false));
     body.append(h('div', { class: 'banner ' + (offline ? 'warn' : 'error') }, offline ? 'The Taxes tab needs an internet connection. It is not stored on the phone.' : (e && e.message) || 'Could not load the figures.'),
-      h('div', { class: 'actions-bar' }, h('button', { class: 'btn primary', onclick: load }, iconEl('refresh'), 'Try again')));
+      h('div', { class: 'actions-bar' }, h('button', { class: 'btn primary', onclick: () => load(true) }, iconEl('refresh'), 'Try again')));
   }
-  function load() {
+  const forMonth = all => Object.assign({}, all, { month, profit: (all.months && all.months[month]) || all.profit || blankProfit() });
+  function load(force) {
+    if (!force && taxesCache && Date.now() - taxesCache.at < TAXES_KEEP_MS && taxesCache.data.months) { draw(forMonth(taxesCache.data)); return; }
     body.innerHTML = ''; body.append(h('p', { class: 'note' }, 'Loading the figures from the tax portal data…'));
-    call('taxes', { month }, model.token).then(draw, fail);
+    call('taxes', { month }, model.token).then(d => { taxesCache = { at: Date.now(), data: d }; draw(forMonth(d)); }, fail);
   }
   load();
   return { title: 'Taxes', node, live: false };
