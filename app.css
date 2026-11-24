@@ -399,3 +399,12 @@ details.more[open] > summary::after { content: ' −'; }
 .file-list li { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file-list .file-name { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-x { flex: none; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 50%; background: var(--paper); color: var(--ink-2); font-size: 18px; line-height: 1; }
+
+/* taxes dashboard (Omar, 24 Nov 2026) */
+.month-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px 0; }
+.month-nav .month-label { font-family: var(--serif); font-size: 18px; font-weight: 600; }
+.totals .total.pos .total-value { color: var(--green); }
+.totals .total.neg .total-value { color: var(--red); }
+.gap-bar { height: 6px; background: var(--wash); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+.gap-bar span { display: block; height: 100%; background: var(--sand-deep); border-radius: 3px; }
+.gap-row .main { min-width: 0; flex: 1; }
