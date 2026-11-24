@@ -46,7 +46,8 @@ export const icon = {
   upload: P('<path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/>'),
   arrow: P('<path d="M5 12h14M13 6l6 6-6 6"/>'),
   x: P('<path d="M6 6l12 12M18 6L6 18"/>'),
-  refresh: P('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>')
+  refresh: P('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>'),
+  receipt: P('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>')
 };
 export const iconEl = (name, cls) => h('span', { class: cls || 'ic', html: icon[name], style: 'display:inline-flex' });
 
