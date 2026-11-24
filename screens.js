@@ -796,15 +796,27 @@ const TAXES_KEEP_MS = 10 * 60 * 1000;
 let taxesCache = null; // { at, data }
 const blankProfit = () => ({ sales: 0, salesCredit: 0, salesDebit: 0, purchases: 0, purchaseCredit: 0, purchaseDebit: 0, profit: 0, counts: { sales: 0, salesCredit: 0, salesDebit: 0, purchases: 0, purchaseCredit: 0, purchaseDebit: 0 } });
 
-export function taxesScreen(monthParam) {
+export function taxesScreen(monthParam, viewParam) {
+  /* v1.11.0 (Omar, 24 Nov 2026): Month and Year views. Month = that month's profit and its gap
+   * (from the "Gap Monthly" tab); Year = the year's profit (sum of its months) and the yearly gap
+   * (Pivot Table 1). Arrows move one month or one year. */
+  const view = viewParam === 'year' ? 'year' : 'month';
   const month = /^\d{4}-\d{2}$/.test(monthParam || '') ? monthParam : thisMonth();
+  const year = month.slice(0, 4);
   const node = h('div');
   const body = h('div', null, h('p', { class: 'note' }, 'Loading the figures from the tax portal data…'));
+  const href = (m, v) => '#/taxes?m=' + m + (v === 'year' ? '&v=year' : '');
+  const seg = h('div', { class: 'segmented', role: 'group', 'aria-label': 'View' },
+    h('button', { 'aria-pressed': String(view === 'month'), onclick: () => { location.hash = href(month, 'month'); } }, 'Month'),
+    h('button', { 'aria-pressed': String(view === 'year'), onclick: () => { location.hash = href(month, 'year'); } }, 'Year'));
+  const step = view === 'year' ? 12 : 1;
+  const prev = shiftMonth(month, -step), next = shiftMonth(month, step);
+  const nextAllowed = view === 'year' ? next.slice(0, 4) <= thisMonth().slice(0, 4) : month < thisMonth();
   const nav = h('div', { class: 'month-nav' },
-    h('a', { class: 'btn small', href: '#/taxes?m=' + shiftMonth(month, -1), 'aria-label': 'Previous month' }, '‹'),
-    h('div', { class: 'month-label' }, monthLabel(month)),
-    month < thisMonth() ? h('a', { class: 'btn small', href: '#/taxes?m=' + shiftMonth(month, 1), 'aria-label': 'Next month' }, '›') : h('span', { class: 'btn small', 'aria-hidden': 'true', style: 'visibility:hidden' }, '›'));
-  node.append(nav, body);
+    h('a', { class: 'btn small', href: href(prev, view), 'aria-label': view === 'year' ? 'Previous year' : 'Previous month' }, '‹'),
+    h('div', { class: 'month-label' }, view === 'year' ? year : monthLabel(month)),
+    nextAllowed ? h('a', { class: 'btn small', href: href(view === 'year' && next > thisMonth() ? thisMonth() : next, view), 'aria-label': view === 'year' ? 'Next year' : 'Next month' }, '›') : h('span', { class: 'btn small', 'aria-hidden': 'true', style: 'visibility:hidden' }, '›'));
+  node.append(seg, nav, body);
 
   const tile = (label, value, note, cls) => h('div', { class: 'total' + (cls ? ' ' + cls : '') },
     h('div', { class: 'total-label' }, label), h('div', { class: 'total-value' }, value), note ? h('div', { class: 'total-note' }, note) : null);
@@ -812,29 +824,43 @@ export function taxesScreen(monthParam) {
   // credit / debit notes are counted in the profit; mentioned under Sales / Purchases only when there are any
   const notesText = (cr, crN, dr, drN) => (crN ? ' · credit notes − ' + egp(cr) : '') + (drN ? ' · debit notes + ' + egp(dr) : '');
 
-  function draw(d) {
+  function yearProfit(all) {
+    const out = blankProfit();
+    Object.keys(all.months || {}).filter(k => k.slice(0, 4) === year).forEach(k => {
+      const p = all.months[k];
+      ['sales', 'salesCredit', 'salesDebit', 'purchases', 'purchaseCredit', 'purchaseDebit', 'profit'].forEach(f => { out[f] += p[f] || 0; });
+      Object.keys(out.counts).forEach(f => { out.counts[f] += (p.counts && p.counts[f]) || 0; });
+    });
+    return out;
+  }
+
+  function gapList(g, title, sourceNote) {
+    const sec = h('div', { class: 'section' }, sectionHead(title));
+    if (!g || g.missing) { sec.append(h('p', { class: 'note' }, sourceNote ? 'The gap table was not found: ' + sourceNote : 'No gap figures for this period yet.')); return sec; }
+    sec.append(h('div', { class: 'totals' }, tile('Total gap', kegp(g.total), sourceNote, g.total > 0 ? 'neg' : 'pos')));
+    if (!g.categories.length) { sec.append(h('p', { class: 'note' }, 'No gap in this period.')); return sec; }
+    sec.append(h('div', { class: 'section-head', style: 'margin-top:12px' }, 'Top ' + Math.round((g.topShare || 0.8) * 100) + '% of the gap', h('span', { class: 'count' }, String(g.categories.length))));
+    sec.append(h('div', { class: 'list' }, g.categories.map(cat => h('div', { class: 'row gap-row' },
+      h('div', { class: 'main' }, h('div', { class: 'title' }, cat.name),
+        h('div', { class: 'gap-bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(cat.share * 100)) + '%' })),
+        h('div', { class: 'sub' }, Math.round(cat.share * 100) + '% of the gap · ' + Math.round(cat.cumulative * 100) + '% together')),
+      h('div', { class: 'meta' }, h('span', { class: 'row-price' }, kegp(cat.gap)))))));
+    return sec;
+  }
+
+  function draw(all) {
     body.innerHTML = '';
-    const p = d.profit, c = p.counts;
-    body.append(h('div', { class: 'section' }, sectionHead('Profit – ' + monthLabel(d.month)),
-      h('div', { class: 'totals', role: 'group', 'aria-label': 'Profit this month' },
+    const p = view === 'year' ? yearProfit(all) : ((all.months && all.months[month]) || all.profit || blankProfit());
+    const c = p.counts;
+    body.append(h('div', { class: 'section' }, sectionHead('Profit – ' + (view === 'year' ? year : monthLabel(month))),
+      h('div', { class: 'totals', role: 'group', 'aria-label': 'Profit' },
         tile('Profit (reported)', egp(p.profit), 'Sales − purchases after credit notes, ex-VAT', p.profit < 0 ? 'neg' : 'pos'),
         tile('Sales', egp(p.sales), count(c.sales, 'invoice') + notesText(p.salesCredit, c.salesCredit, p.salesDebit, c.salesDebit)),
         tile('Purchases', egp(p.purchases), count(c.purchases, 'invoice') + notesText(p.purchaseCredit, c.purchaseCredit, p.purchaseDebit, c.purchaseDebit)))));
-
-    const g = d.gap || {};
-    const gapSec = h('div', { class: 'section' }, sectionHead('Tax gap'));
-    if (g.missing) gapSec.append(h('p', { class: 'note' }, 'The gap table ("Pivot Table 1") was not found in the ETA Legal Accounting sheet.'));
-    else {
-      gapSec.append(h('div', { class: 'totals' }, tile('Total gap', kegp(g.total), 'Column D of the ETA Legal Accounting sheet', g.total > 0 ? 'neg' : 'pos')));
-      gapSec.append(h('div', { class: 'section-head', style: 'margin-top:12px' }, 'Top ' + Math.round((g.topShare || 0.8) * 100) + '% of the gap', h('span', { class: 'count' }, String(g.categories.length))));
-      gapSec.append(h('div', { class: 'list' }, g.categories.map(cat => h('div', { class: 'row gap-row' },
-        h('div', { class: 'main' }, h('div', { class: 'title' }, cat.name),
-          h('div', { class: 'gap-bar', 'aria-hidden': 'true' }, h('span', { style: 'width:' + Math.max(2, Math.round(cat.share * 100)) + '%' })),
-          h('div', { class: 'sub' }, Math.round(cat.share * 100) + '% of the gap · ' + Math.round(cat.cumulative * 100) + '% together')),
-        h('div', { class: 'meta' }, h('span', { class: 'row-price' }, kegp(cat.gap)))))));
-    }
-    body.append(gapSec);
-    body.append(h('p', { class: 'note' }, 'Source: ETA e-invoicing portal (Valid documents only), updated every hour. Read at ' + d.updatedAt + '.'));
+    if (view === 'year') body.append(gapList(all.gap, 'Tax gap – ' + year, 'Pivot Table 1, column D'));
+    else body.append(gapList((all.gapMonths || {})[month] || { total: 0, categories: [], topShare: 0.8 }, 'Tax gap – ' + monthLabel(month), 'Gap Monthly tab'));
+    body.append(h('p', { class: 'note' }, 'Source: ETA e-invoicing portal (Valid documents only), updated every hour. Read at ' + all.updatedAt + '.'
+      + (view === 'month' ? ' A month’s gap uses the same rule as the yearly one, so months do not add up to the year.' : '')));
   }
 
   function fail(e) {
@@ -843,11 +869,10 @@ export function taxesScreen(monthParam) {
     body.append(h('div', { class: 'banner ' + (offline ? 'warn' : 'error') }, offline ? 'The Taxes tab needs an internet connection. It is not stored on the phone.' : (e && e.message) || 'Could not load the figures.'),
       h('div', { class: 'actions-bar' }, h('button', { class: 'btn primary', onclick: () => load(true) }, iconEl('refresh'), 'Try again')));
   }
-  const forMonth = all => Object.assign({}, all, { month, profit: (all.months && all.months[month]) || all.profit || blankProfit() });
   function load(force) {
-    if (!force && taxesCache && Date.now() - taxesCache.at < TAXES_KEEP_MS && taxesCache.data.months) { draw(forMonth(taxesCache.data)); return; }
+    if (!force && taxesCache && Date.now() - taxesCache.at < TAXES_KEEP_MS && taxesCache.data.months && taxesCache.data.gapMonths) { draw(taxesCache.data); return; }
     body.innerHTML = ''; body.append(h('p', { class: 'note' }, 'Loading the figures from the tax portal data…'));
-    call('taxes', { month }, model.token).then(d => { taxesCache = { at: Date.now(), data: d }; draw(forMonth(d)); }, fail);
+    call('taxes', { month }, model.token).then(d => { taxesCache = { at: Date.now(), data: d }; draw(d); }, fail);
   }
   load();
   return { title: 'Taxes', node, live: false };
