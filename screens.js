@@ -822,7 +822,9 @@ export function taxesScreen(monthParam, viewParam) {
     h('div', { class: 'total-label' }, label), h('div', { class: 'total-value' }, value), note ? h('div', { class: 'total-note' }, note) : null);
   const count = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
   // credit / debit notes are counted in the profit; mentioned under Sales / Purchases only when there are any
-  const notesText = (cr, crN, dr, drN) => (crN ? ' · credit notes − ' + egp(cr) : '') + (drN ? ' · debit notes + ' + egp(dr) : '');
+  // v1.11.1 (Omar, 24 Nov 2026): every figure on this tab in kEGP
+  const k = v => kegp(v / 1000);
+  const notesText = (cr, crN, dr, drN) => (crN ? ' · credit notes − ' + k(cr) : '') + (drN ? ' · debit notes + ' + k(dr) : '');
 
   function yearProfit(all) {
     const out = blankProfit();
@@ -854,9 +856,9 @@ export function taxesScreen(monthParam, viewParam) {
     const c = p.counts;
     body.append(h('div', { class: 'section' }, sectionHead('Profit – ' + (view === 'year' ? year : monthLabel(month))),
       h('div', { class: 'totals', role: 'group', 'aria-label': 'Profit' },
-        tile('Profit (reported)', egp(p.profit), 'Sales − purchases after credit notes, ex-VAT', p.profit < 0 ? 'neg' : 'pos'),
-        tile('Sales', egp(p.sales), count(c.sales, 'invoice') + notesText(p.salesCredit, c.salesCredit, p.salesDebit, c.salesDebit)),
-        tile('Purchases', egp(p.purchases), count(c.purchases, 'invoice') + notesText(p.purchaseCredit, c.purchaseCredit, p.purchaseDebit, c.purchaseDebit)))));
+        tile('Profit (reported)', k(p.profit), 'Sales − purchases after credit notes, ex-VAT', p.profit < 0 ? 'neg' : 'pos'),
+        tile('Sales', k(p.sales), count(c.sales, 'invoice') + notesText(p.salesCredit, c.salesCredit, p.salesDebit, c.salesDebit)),
+        tile('Purchases', k(p.purchases), count(c.purchases, 'invoice') + notesText(p.purchaseCredit, c.purchaseCredit, p.purchaseDebit, c.purchaseDebit)))));
     if (view === 'year') body.append(gapList(all.gap, 'Tax gap – ' + year, 'Pivot Table 1, column D'));
     else body.append(gapList((all.gapMonths || {})[month] || { total: 0, categories: [], topShare: 0.8 }, 'Tax gap – ' + monthLabel(month), 'Gap Monthly tab'));
     body.append(h('p', { class: 'note' }, 'Source: ETA e-invoicing portal (Valid documents only), updated every hour. Read at ' + all.updatedAt + '.'
