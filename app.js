@@ -15,6 +15,7 @@ let needsLogin = false;
  * #/projects          Projects, all stages (Management)
  * #/actions           Actions dashboard
  * #/cs                Customer Satisfaction form (CS roles)
+ * #/taxes?m=yyyy-MM   Taxes dashboard (ticked users only; online)
  * #/p/<P#>            project        #/i/<Item #>   item
  * #/a/<Action #>      action         #/r/<table>/<key>  any other record
  * #/actions/at/<location>?who=<name>   open actions of one person at one location
@@ -36,6 +37,7 @@ function screenFor({ parts, params }) {
     case 'projects': return perms.seeAllProjectsMenu ? S.projectsScreen('all') : S.projectsScreen('active');
     case 'actions': return b === 'at' ? S.actionsAtScreen(c, params.get('who')) : S.actionsScreen();
     case 'cs': return S.satisfactionScreen();
+    case 'taxes': return perms.seeTaxes ? S.taxesScreen(params.get('m')) : S.projectsScreen('active');
     case 'p': return S.projectScreen(b);
     case 'i': return S.itemScreen(b);
     case 'a': return S.actionScreen(b);
@@ -66,7 +68,8 @@ function drawTabs() {
     perms.seeAllProjectsMenu ? ['#/projects', 'Projects', icon.archive, 'projects'] : null,
     ['#/active', 'Active', icon.pipeline, 'active'],
     ['#/actions', 'Actions', icon.tasks, 'actions'],
-    perms.seeSatisfactionMenu ? ['#/cs', 'Satisfaction', icon.smile, 'cs'] : null
+    perms.seeSatisfactionMenu ? ['#/cs', 'Satisfaction', icon.smile, 'cs'] : null,
+    perms.seeTaxes ? ['#/taxes', 'Taxes', icon.receipt, 'taxes'] : null
   ].filter(Boolean);
   const here = parseRoute().parts[0] || 'active';
   tabbar.innerHTML = '';
