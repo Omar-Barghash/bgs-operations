@@ -101,7 +101,9 @@ var BGS = (function () {
         { name: 'Move to Payment', type: 'bool', optional: true },
         { name: 'Move to Done', type: 'bool', optional: true },
         // Omar, 24 Nov 2026: Taxes dashboard (legal ETA figures) – only people ticked here
-        { name: 'Taxes Dashboard', type: 'bool', optional: true }
+        { name: 'Taxes Dashboard', type: 'bool', optional: true },
+        // Omar, 26 Nov 2026: who may bring a rejected project back
+        { name: 'Restore Rejected', type: 'bool', optional: true }
       ]
     },
     // Omar, 6 Nov 2026: notes written inside a project, shown at the bottom of it
@@ -247,7 +249,9 @@ var BGS = (function () {
     { key: 'moveToPayment', column: 'Move to Payment', label: 'Move projects to Waiting for Payment', legacy: function (u) { return deptIn(u, [DEPT.OPS, DEPT.MGMT]); } },
     { key: 'moveToDone', column: 'Move to Done', label: 'Move projects to Done', legacy: function (u) { return deptIn(u, [DEPT.BD, DEPT.MGMT]); } },
     // Omar, 24 Nov 2026: Taxes tab (this month's profit from ETA invoices, tax gap). Nobody sees it unless ticked.
-    { key: 'taxesDashboard', column: 'Taxes Dashboard', label: 'Taxes dashboard', legacy: function () { return false; } }
+    { key: 'taxesDashboard', column: 'Taxes Dashboard', label: 'Taxes dashboard', legacy: function () { return false; } },
+    // Omar, 26 Nov 2026: "Bring back" on rejected projects. Pre-ticked for Management (Omar, Farida).
+    { key: 'restoreRejected', column: 'Restore Rejected', label: 'Bring back rejected projects', legacy: function (u) { return deptIn(u, [DEPT.MGMT]); } }
   ];
   function accessDef(key) { for (var i = 0; i < ACCESS.length; i++) { if (ACCESS[i].key === key) return ACCESS[i]; } return null; }
   /* user.access = { key: true/false } for every tick column present in the Users sheet */
@@ -483,6 +487,31 @@ var BGS = (function () {
   /* SOURCE: "Move to Rejected" — anyone, unless stage is 5, 6 or 7. */
   function canReject(project) { return !stageIn(project.Stage, [S5, S6, S7]); }
 
+  /* Bring a rejected project back (Omar, 26 Nov 2026).
+   * DECISIONS: the user picks the stage (1-4, the stages a project can be
+   * rejected from); only users with the "Restore Rejected" tick; the
+   * Rejection Reason stays on the project. Stage_History records it.
+   * rejectedFrom = the stage it was rejected from (from Stage_History), used
+   * as the suggested choice; old AppSheet rejections have none -> Approaching. */
+  var RESTORE_STAGES = [S1, S2, S3, S4];
+  function canRestore(project, user) { return same(project.Stage, S7) && can(user, 'restoreRejected'); }
+  function rejectedFrom(projectKey, history) {
+    var best = null, bestT = -1;
+    var when = function (v) {
+      if (v && typeof v.getTime === 'function') return v.getTime();
+      var t = Date.parse(norm(v).replace(' ', 'T'));
+      return isNaN(t) ? 0 : t;
+    };
+    (history || []).forEach(function (h) {
+      if (norm(h.Project_ID) !== norm(projectKey) || !same(h.To_Stage, S7)) return;
+      var t = when(h.Changed_At);
+      if (!best || t >= bestT) { best = h; bestT = t; }   // later rows win ties
+    });
+    var from = best ? norm(best.From_Stage) : '';
+    for (var i = 0; i < RESTORE_STAGES.length; i++) { if (same(RESTORE_STAGES[i], from)) return RESTORE_STAGES[i]; }
+    return S1;
+  }
+
   /* ---------- Action Tracker status (SOURCE: Status initial value + Reset_If) ---------- */
   function isOpenAction(a) { return !inList(a.Status, ['Completed', 'Closed']); }
   function statusForNewAction(due, today) { return (!isBlank(due) && norm(due) < today) ? 'Late' : 'In Progress'; }
@@ -531,7 +560,7 @@ var BGS = (function () {
     hiddenColumnsFor: hiddenColumnsFor, canSeeProject: canSeeProject,
     fileList: fileList, fileJoin: fileJoin, MAX_FILES: MAX_FILES,
     fieldRule: fieldRule, canAdd: canAdd, canDelete: canDelete,
-    customersForCompany: customersForCompany, nextMove: nextMove, moveAccessNote: moveAccessNote, ACCESS: ACCESS, can: can, accessFromRow: accessFromRow, previousStage: previousStage, moveTo: moveTo, canReject: canReject,
+    customersForCompany: customersForCompany, nextMove: nextMove, moveAccessNote: moveAccessNote, ACCESS: ACCESS, can: can, accessFromRow: accessFromRow, previousStage: previousStage, moveTo: moveTo, canReject: canReject, RESTORE_STAGES: RESTORE_STAGES, canRestore: canRestore, rejectedFrom: rejectedFrom,
     isOpenAction: isOpenAction, statusForNewAction: statusForNewAction, statusAfterEdit: statusAfterEdit,
     sellingPriceRule: sellingPriceRule, photoOptional: photoOptional, bdProjectName: bdProjectName
   };
