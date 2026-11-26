@@ -267,6 +267,21 @@ export function projectScreen(key) {
         toast('Moved back to ' + stageShort(prev) + '.');
       } }, iconEl('back'), 'Back to ' + stageShort(prev)));
     }
+    // Omar, 26 Nov 2026: bring a rejected project back to a stage the user picks
+    if (!isTemp(pnum) && B.canRestore(p, model.user)) {
+      bar.append(h('button', { class: 'btn primary restore', onclick: async () => {
+        const suggested = B.rejectedFrom(pnum, model.view.Stage_History);
+        const choices = h('div', { class: 'restore-choices', role: 'radiogroup', 'aria-label': 'Stage to bring it back to' },
+          B.RESTORE_STAGES.map(s => h('label', { class: 'restore-choice' },
+            h('input', { type: 'radio', name: 'restore-stage', value: s, checked: s === suggested ? true : null }),
+            h('span', null, s, s === suggested ? h('span', { class: 'hint' }, ' (rejected from here)') : null))));
+        if (!await confirmDialog({ title: 'Bring this project back?', message: 'Choose the stage it goes back to. The rejection reason stays on the project, and this is recorded in the stage history.', extra: choices, confirmText: 'Bring back' })) return;
+        const picked = choices.querySelector('input[name="restore-stage"]:checked');
+        const to = picked ? picked.value : suggested;
+        await enqueue({ op: 'restore', table: 'Projects', key: pnum, to }, 'Bring back project ' + (p['BD Project Name'] || pnum) + ' to ' + stageShort(to));
+        toast('Brought back to ' + stageShort(to) + '.');
+      } }, iconEl('back'), 'Bring back'));
+    }
     bar.append(h('a', { class: 'btn', href: '#/edit/Projects/' + encodeURIComponent(pnum) }, iconEl('edit'), 'Edit'));
     if (B.canReject(p)) {
       bar.append(h('button', { class: 'btn danger', onclick: async () => {
