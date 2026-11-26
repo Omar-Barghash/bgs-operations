@@ -100,6 +100,7 @@ function describe(ch) {
     case 'delete': return 'Delete ' + singular(label) + ' ' + ch.key;
     case 'move': return 'Move project ' + ch.key + ' to ' + ch.to;
     case 'reject': return 'Reject project ' + ch.key;
+    case 'restore': return 'Bring back project ' + ch.key + ' to ' + ch.to;
     case 'complete': return 'Complete action ' + ch.key;
     case 'upload': return 'Upload ' + (ch.fileName || 'file') + ' to ' + singular(label) + ' ' + ch.key;
     case 'removeFile': return 'Remove ' + String(ch.path || 'file').split('/').pop() + ' from ' + singular(label) + ' ' + ch.key;
@@ -188,6 +189,11 @@ function applyLocal(t, ch) {
     Object.assign(r, { Stage: B.S.S7, 'Rejection Reason': ch.reason });
     mark(r);
     t.Stage_History.push(mark({ History_ID: 'tmp-h-' + ch.id.slice(0, 8), Project_ID: r['P#'], From_Stage: from, To_Stage: B.S.S7, Changed_By: u.name, Changed_At: now, Comment: '' }));
+  } else if (ch.op === 'restore') {
+    // Omar, 26 Nov 2026: back from Rejected to the stage the user picked; the reason is kept
+    const r = findIn(t, 'Projects', ch.key); if (!r || !B.same(r.Stage, B.S.S7)) return;
+    r.Stage = ch.to; mark(r);
+    t.Stage_History.push(mark({ History_ID: 'tmp-h-' + ch.id.slice(0, 8), Project_ID: r['P#'], From_Stage: B.S.S7, To_Stage: ch.to, Changed_By: u.name, Changed_At: now, Comment: '' }));
   } else if (ch.op === 'complete') {
     const r = findIn(t, 'Action Tracker', ch.key); if (r) { r.Status = 'Completed'; mark(r); }
   } else if (ch.op === 'upload') {
